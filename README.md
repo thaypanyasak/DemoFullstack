@@ -24,5 +24,5 @@ A full-stack web application built with **Next.js (App Router)** and **Supabase*
 ### 1. Clone the Repository
 
 ```bash
-git clone [https://github.com/your-username/your-repo-name.git](https://github.com/your-username/your-repo-name.git)
-cd your-repo-name
+git clone [[https://github.com/your-username/your-repo-name.git](https://github.com/your-username/your-repo-name.git](https://github.com/thaypanyasak/DemoFullstack.git))
+cd DemoFullstack
