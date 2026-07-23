@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { ShopPage } from "@/features/shop/components/ShopPage";
 
 export default function Home() {
-  redirect("/dashboard");
+  return <ShopPage />;
 }
