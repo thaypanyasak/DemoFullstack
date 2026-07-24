@@ -35,10 +35,12 @@ export function ShopPage() {
   // Shopping Cart state
   const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [ordering, setOrdering] = useState(false);
 
   // Active orders tracking for this table
   const [activeTableOrders, setActiveTableOrders] = useState<Order[]>([]);
+  const [dbTables, setDbTables] = useState<{ id: number; name: string }[]>([]);
 
   // View details modal
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -48,7 +50,7 @@ export function ShopPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // 1. Detect Table Number and Fetch Categories on mount
+  // 1. Detect Table Number and Fetch Categories & Tables on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -64,6 +66,16 @@ export function ShopPage() {
     fetchCategories()
       .then(setCategories)
       .catch((err) => console.error("Error loading categories:", err));
+
+    // Fetch Tables from DB
+    fetch("/api/tables")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setDbTables(data);
+        }
+      })
+      .catch((err) => console.error("Error loading tables from database:", err));
   }, []);
 
   // 2. Fetch active orders for this table to track status
@@ -236,12 +248,22 @@ export function ShopPage() {
             </div>
           </div>
 
-          <a
-            href="/dashboard"
-            className="text-[10px] font-bold text-slate-500 hover:text-amber-600 transition-colors border border-slate-200 px-2.5 py-1.5 rounded-lg bg-slate-50"
-          >
-            ຈັດການຫຼັງຮ້ານ
-          </a>
+          <div className="flex items-center gap-2">
+            {tableNumber && activeTableOrders.length > 0 && (
+              <button
+                onClick={() => setIsHistoryModalOpen(true)}
+                className="text-[10px] font-bold text-orange-600 hover:text-orange-700 hover:bg-orange-50 border border-orange-200 px-2.5 py-1.5 rounded-lg bg-white flex items-center gap-1 cursor-pointer"
+              >
+                <Clock className="h-3 w-3" /> ປະຫວັດສັ່ງ ({activeTableOrders.reduce((sum, o) => sum + o.items.reduce((iSum, i) => iSum + i.quantity, 0), 0)})
+              </button>
+            )}
+            <a
+              href="/dashboard"
+              className="text-[10px] font-bold text-slate-500 hover:text-amber-600 transition-colors border border-slate-200 px-2.5 py-1.5 rounded-lg bg-slate-50"
+            >
+              ຈັດການຫຼັງຮ້ານ
+            </a>
+          </div>
         </div>
 
         {/* Quick Search */}
@@ -588,19 +610,18 @@ export function ShopPage() {
 
               {/* Grid of Tables */}
               <div className="grid grid-cols-4 gap-2.5">
-                {Array.from({ length: 12 }, (_, i) => {
-                  const num = String(i + 1).padStart(2, "0");
-                  const isActive = tableNumber === num;
+                {dbTables.map((t) => {
+                  const isActive = tableNumber === t.name;
                   return (
                     <button
-                      key={num}
+                      key={t.id}
                       onClick={() => {
-                        setTableNumber(num);
+                        setTableNumber(t.name);
                         if (typeof window !== "undefined") {
-                          window.history.pushState({}, "", `?table=${num}`);
+                          window.history.pushState({}, "", `?table=${encodeURIComponent(t.name)}`);
                         }
                         setIsTableModalOpen(false);
-                        showToast(`ເລືອກ ໂຕະ ${num} ສຳເລັດ!`);
+                        showToast(`ເລືອກ ໂຕະ ${t.name} ສຳເລັດ!`);
                       }}
                       className={`py-3.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                         isActive
@@ -608,7 +629,7 @@ export function ShopPage() {
                           : "bg-slate-100 hover:bg-slate-200 text-slate-700"
                       }`}
                     >
-                      {num}
+                      {t.name}
                     </button>
                   );
                 })}
@@ -659,6 +680,109 @@ export function ShopPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Active Table Orders History Modal ── */}
+      {isHistoryModalOpen && tableNumber && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4">
+          <div className="bg-white border rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[80vh] overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b p-4 shrink-0 bg-slate-50">
+              <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                <Clock className="h-4 w-4 text-orange-600" /> ປະຫວັດການສັ່ງອາຫານ (ໂຕະ {tableNumber})
+              </span>
+              <button
+                onClick={() => setIsHistoryModalOpen(false)}
+                className="h-7 w-7 rounded-full hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {activeTableOrders.length === 0 ? (
+                <div className="text-center py-8 text-slate-400">
+                  <Utensils className="h-8 w-8 opacity-25 mx-auto mb-2" />
+                  <p className="text-xs">ຍັງບໍ່ມີປະຫວັດການສັ່ງອາຫານ</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Group items by product name and status */}
+                  {(() => {
+                    const groupedItems: Record<string, { name: string; quantity: number; price: number; statuses: Set<string> }> = {};
+                    activeTableOrders.forEach((order) => {
+                      order.items.forEach((item) => {
+                        const key = item.product.name;
+                        const statusLao = statusLaoMap[order.status] || order.status;
+                        if (groupedItems[key]) {
+                          groupedItems[key].quantity += item.quantity;
+                          groupedItems[key].statuses.add(statusLao);
+                        } else {
+                          groupedItems[key] = {
+                            name: item.product.name,
+                            quantity: item.quantity,
+                            price: item.price,
+                            statuses: new Set([statusLao]),
+                          };
+                        }
+                      });
+                    });
+
+                    return (
+                      <div className="divide-y border rounded-xl overflow-hidden bg-slate-50/50">
+                        {Object.values(groupedItems).map((item, idx) => (
+                          <div key={idx} className="p-3 bg-white flex items-start justify-between gap-3 text-xs">
+                            <div className="space-y-1">
+                              <h4 className="font-extrabold text-slate-800 leading-tight">{item.name}</h4>
+                              <div className="flex flex-wrap gap-1">
+                                {Array.from(item.statuses).map((status, sIdx) => (
+                                  <span
+                                    key={sIdx}
+                                    className="bg-orange-50 border border-orange-100 text-orange-700 text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+                                  >
+                                    {status}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="font-mono font-bold text-slate-700 block">x{item.quantity}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{formatLAK(item.price * item.quantity)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Summary bill box */}
+                  <div className="p-4 bg-orange-50/50 border border-orange-200/50 rounded-xl space-y-1.5">
+                    <div className="flex justify-between items-center text-xs font-bold text-orange-950">
+                      <span>ຍອດລວມສະສົມທັງໝົດ / Accum. Total:</span>
+                      <span className="font-mono text-sm font-black text-orange-600">
+                        {formatLAK(activeTableOrders.reduce((sum, o) => sum + o.totalAmount, 0))}
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-slate-400 text-center leading-normal">
+                      * ຍອດລວມອາຫານທັງໝົດຂອງທຸກໆອໍເດີ້ທີ່ສັ່ງໃນຄັ້ງນີ້ (ລໍຖ້າແຄັດເຊຍເຊັກບິນລວມ)
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="border-t p-4 bg-slate-50 flex gap-3">
+              <button
+                onClick={() => setIsHistoryModalOpen(false)}
+                className="w-full rounded-xl bg-slate-900 py-3 text-xs font-bold text-white hover:bg-slate-800 transition-all cursor-pointer text-center"
+              >
+                ປິດໜ້າຕ່າງ
+              </button>
             </div>
           </div>
         </div>

@@ -16,8 +16,13 @@ import { fetchOrders, updateOrderStatus } from "../api/orders.api";
 import { ORDER_STATUS_COLORS, ORDER_STATUS_LAO } from "@/types/order";
 import type { Order, OrderStatus } from "@/types/order";
 import { formatLAK, formatDateTime } from "@/lib/format";
-import { ClipboardList, RefreshCw, Clock, Coffee, CheckCircle, XCircle, Printer, X } from "lucide-react";
+import { ClipboardList, RefreshCw, Clock, Coffee, CheckCircle, XCircle, Printer, X, Inbox, ListFilter } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+
+interface TrackerOrder extends Order {
+  isConsolidated?: boolean;
+  consolidatedIds?: number[];
+}
 
 export function OrdersTrackerPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -25,16 +30,50 @@ export function OrdersTrackerPage() {
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
+  
+  // Navigation tabs
+  const [viewTab, setViewTab] = useState<"kds" | "history">("kds");
+  // KDS Column tabs for mobile screens
+  const [kdsMobileTab, setKdsMobileTab] = useState<"pending" | "preparing" | "served">("pending");
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  const getOrders = async (silent = false) => {
+  const getOrders = async (silent = false, updatedTableNumber?: string) => {
     if (!silent) setLoading(true);
     try {
       const data = await fetchOrders();
+      
+      if (updatedTableNumber && orders.length > 0) {
+        // Find matching pending order in current state (old) and fetched data (new)
+        const oldOrder = orders.find(
+          (o) => o.tableNumber === updatedTableNumber && o.status === "PENDING"
+        );
+        const newOrder = data.find(
+          (o) => o.tableNumber === updatedTableNumber && o.status === "PENDING"
+        );
+
+        if (oldOrder && newOrder) {
+          const additions: string[] = [];
+          newOrder.items.forEach((newItem) => {
+            const oldItem = oldOrder.items.find((oi) => oi.productId === newItem.productId);
+            const oldQty = oldItem ? oldItem.quantity : 0;
+            const diff = newItem.quantity - oldQty;
+            if (diff > 0) {
+              additions.push(`${newItem.product.name} (+${diff})`);
+            }
+          });
+
+          if (additions.length > 0) {
+            showToast(`ໂຕະ ${updatedTableNumber} ເພີ່ມ: ${additions.join(", ")} 🔔`);
+          } else {
+            showToast(`ອໍເດີ້ໂຕະ ${updatedTableNumber} ມີການອັບເດດ! 🔔`);
+          }
+        }
+      }
+
       setOrders(data);
     } catch (err: any) {
       showToast(err.message || "ເກີດຂໍ້ຜິດພາດໃນການດຶງຂໍ້ມູນອໍເດີ້", "error");
@@ -43,13 +82,86 @@ export function OrdersTrackerPage() {
     }
   };
 
+  // Native double bell chime (offline friendly)
+  const playKitchenChime = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      // First bell tone
+      const osc1 = audioCtx.createOscillator();
+      const gain1 = audioCtx.createGain();
+      osc1.connect(gain1);
+      gain1.connect(audioCtx.destination);
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+      gain1.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      gain1.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.45);
+      osc1.start(audioCtx.currentTime);
+      osc1.stop(audioCtx.currentTime + 0.45);
+      
+      // Second higher bell tone after 120ms
+      const osc2 = audioCtx.createOscillator();
+      const gain2 = audioCtx.createGain();
+      osc2.connect(gain2);
+      gain2.connect(audioCtx.destination);
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(880.00, audioCtx.currentTime + 0.12); // A5
+      gain2.gain.setValueAtTime(0.12, audioCtx.currentTime + 0.12);
+      gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.57);
+      osc2.start(audioCtx.currentTime + 0.12);
+      osc2.stop(audioCtx.currentTime + 0.57);
+    } catch (err) {
+      console.error("Audio chime playback failed:", err);
+    }
+  };
+
   useEffect(() => {
     getOrders();
-    // Auto refresh every 5 seconds
+
+    // Subscribe to postgres changes in real-time
+    const channel = supabase
+      .channel("kds-realtime-channel")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "Order" },
+        () => {
+          playKitchenChime();
+          showToast("ມີອໍເດີ້ໃໝ່ເຂົ້າມາ! 🔔");
+          getOrders(true);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "Order" },
+        (payload) => {
+          const updatedOrder = payload.new as Order;
+          // Play sound and alert if the order is still PENDING (items merged/modified)
+          if (updatedOrder && updatedOrder.status === "PENDING") {
+            playKitchenChime();
+            getOrders(true, updatedOrder.tableNumber);
+          } else {
+            getOrders(true);
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "Order" },
+        () => {
+          getOrders(true);
+        }
+      )
+      .subscribe();
+
+    // Fallback polling interval every 8 seconds
     const interval = setInterval(() => {
       getOrders(true);
-    }, 5000);
-    return () => clearInterval(interval);
+    }, 8000);
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleUpdateStatus = async (orderId: number, newStatus: OrderStatus) => {
@@ -59,7 +171,7 @@ export function OrdersTrackerPage() {
       showToast("ອັບເດດສະຖານະອໍເດີ້ສໍາເລັດ!");
       getOrders(true);
     } catch (err: any) {
-      showToast(err.message || "ອັບເດດສະຖານະລົ້ມເຫຼວ", "error");
+      showToast(err.message || "ອັບເດດສະຖານະລົ້ມεຫຼວ", "error");
     } finally {
       setUpdatingId(null);
     }
@@ -71,9 +183,211 @@ export function OrdersTrackerPage() {
     }
   };
 
-  // Group active orders vs completed/cancelled
-  const activeOrders = orders.filter((o) => o.status !== "COMPLETED" && o.status !== "CANCELLED");
+  // Group orders into columns
+  const pendingOrders = orders.filter((o) => o.status === "PENDING");
+  const preparingOrders = orders.filter((o) => o.status === "PREPARING");
+  const rawServedOrders = orders.filter((o) => o.status === "SERVED");
   const historyOrders = orders.filter((o) => o.status === "COMPLETED" || o.status === "CANCELLED");
+
+  // Group served orders by table number to print and checkout as a single consolidated bill
+  const servedOrdersGroupedByTable: Record<string, Order[]> = {};
+  rawServedOrders.forEach((o) => {
+    const tableKey = o.tableNumber.trim().toLowerCase();
+    if (!servedOrdersGroupedByTable[tableKey]) {
+      servedOrdersGroupedByTable[tableKey] = [];
+    }
+    servedOrdersGroupedByTable[tableKey].push(o);
+  });
+
+  const consolidatedServedOrders: TrackerOrder[] = Object.entries(servedOrdersGroupedByTable).map(([tableKey, siblingOrders]) => {
+    // Sort siblingOrders by ID to keep the earliest order ID as the representative ID
+    const sortedSiblings = [...siblingOrders].sort((a, b) => a.id - b.id);
+    const primaryOrder = sortedSiblings[0];
+
+    // Merge all items
+    const mergedItemsMap: Record<number, any> = {};
+    siblingOrders.forEach((order) => {
+      order.items.forEach((item) => {
+        if (mergedItemsMap[item.productId]) {
+          mergedItemsMap[item.productId].quantity += item.quantity;
+        } else {
+          mergedItemsMap[item.productId] = {
+            ...item,
+          };
+        }
+      });
+    });
+
+    const mergedItems = Object.values(mergedItemsMap);
+    const totalAmount = siblingOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+
+    return {
+      ...primaryOrder,
+      items: mergedItems,
+      totalAmount: totalAmount,
+      isConsolidated: siblingOrders.length > 1,
+      consolidatedIds: siblingOrders.map(o => o.id),
+    };
+  });
+
+  // Render KDS Card Template
+  const renderOrderCard = (order: TrackerOrder) => {
+    const color = ORDER_STATUS_COLORS[order.status];
+    return (
+      <div
+        key={order.id}
+        className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col justify-between overflow-hidden hover:shadow-md transition-shadow duration-200 shrink-0"
+      >
+        {/* Card Header */}
+        <div className="p-4 border-b bg-slate-50/50 flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-mono text-slate-400 block">
+              {order.consolidatedIds && order.consolidatedIds.length > 1
+                ? `IDs: ${order.consolidatedIds.map((id) => `#${id}`).join(" + ")}`
+                : `ID: #${order.id}`}
+            </span>
+            <h3 className="text-sm font-extrabold text-slate-800 leading-tight">
+              |ໂຕະ {order.tableNumber}
+            </h3>
+          </div>
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wide ${color.bg} ${color.text}`}>
+            {ORDER_STATUS_LAO[order.status]}
+          </span>
+        </div>
+
+        {/* Items List */}
+        <div className="p-4 flex-1 space-y-3">
+          <div className="divide-y">
+            {order.items.map((item: any) => {
+              // Item is new to the order (created at least 10s after order creation)
+              const isNewItem =
+                order.status === "PENDING" &&
+                item.createdAt &&
+                new Date(item.createdAt).getTime() > new Date(order.createdAt).getTime() + 10000;
+
+              // Item quantity was increased later (updated at least 10s after order creation, but not a new item)
+              const isQuantityIncreased =
+                order.status === "PENDING" &&
+                !isNewItem &&
+                item.updatedAt &&
+                new Date(item.updatedAt).getTime() > new Date(order.createdAt).getTime() + 10000;
+
+              const isNewAddition = isNewItem || isQuantityIncreased;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`py-2 px-2 flex items-center justify-between text-xs rounded-xl transition-all duration-300 ${
+                    isNewAddition
+                      ? "bg-amber-50/80 border border-amber-200/50 shadow-sm scale-[1.01] my-1"
+                      : ""
+                  }`}
+                >
+                  <div className="flex-1 pr-2 min-w-0">
+                    <div className="font-extrabold text-slate-700 leading-tight flex items-center gap-1.5 flex-wrap">
+                      <span>{item.product.name}</span>
+                      {isNewItem && (
+                        <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[8px] font-black text-orange-600 border border-orange-200 uppercase tracking-wide animate-pulse shrink-0">
+                          ເພີ່ມໃໝ່
+                        </span>
+                      )}
+                      {isQuantityIncreased && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-black text-amber-700 border border-amber-200 uppercase tracking-wide animate-pulse shrink-0">
+                          ເພີ່ມຈຳນວນ
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      {formatLAK(item.price)}
+                    </div>
+                  </div>
+                  <span className={`font-mono font-bold px-2 py-0.5 rounded-md text-xs shrink-0 transition-colors ${
+                    isNewAddition ? "bg-amber-500 text-white shadow-sm" : "bg-slate-100 text-slate-600"
+                  }`}>
+                    x{item.quantity}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Card Footer */}
+        <div className="p-4 border-t bg-slate-50/20 space-y-3.5">
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-slate-400 flex items-center gap-1 font-semibold text-[10px]">
+              <Clock className="h-3.5 w-3.5" />
+              {formatDateTime(order.createdAt)}
+            </span>
+            <span className="font-black text-slate-900 text-sm">
+              {formatLAK(order.totalAmount)}
+            </span>
+          </div>
+
+          {/* Status Controls */}
+          <div className="flex gap-2">
+            {order.status === "PENDING" && (
+              <>
+                <button
+                  onClick={() => handleUpdateStatus(order.id, "PREPARING")}
+                  disabled={updatingId === order.id}
+                  className="flex-1 rounded-xl bg-amber-500 py-2.5 text-xs font-bold text-white hover:bg-amber-600 transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-sm shadow-amber-500/10 disabled:opacity-50"
+                >
+                  <Coffee className="h-3.5 w-3.5" /> ເລີ່ມເຮັດ
+                </button>
+                <button
+                  onClick={() => handleUpdateStatus(order.id, "CANCELLED")}
+                  disabled={updatingId === order.id}
+                  className="rounded-xl border border-red-200 text-red-600 hover:bg-red-50 px-3 py-2.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="ຍົກເລີກອໍເດີ້"
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </>
+            )}
+            
+            {order.status === "PREPARING" && (
+              <>
+                <button
+                  onClick={() => handleUpdateStatus(order.id, "SERVED")}
+                  disabled={updatingId === order.id}
+                  className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-sm shadow-indigo-500/10 disabled:opacity-50"
+                >
+                  <CheckCircle className="h-3.5 w-3.5" /> ປຸງແຕ່ງສຳເລັດ
+                </button>
+                <button
+                  onClick={() => handleUpdateStatus(order.id, "CANCELLED")}
+                  disabled={updatingId === order.id}
+                  className="rounded-xl border border-red-200 text-red-600 hover:bg-red-50 px-3 py-2.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="ຍົກເລີກອໍເດີ້"
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </>
+            )}
+            
+            {order.status === "SERVED" && (
+              <div className="flex gap-2 w-full">
+                <button
+                  onClick={() => setPrintingOrder(order)}
+                  className="flex-1 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 py-2.5 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1"
+                >
+                  <Printer className="h-3.5 w-3.5" /> ພິມບິນ
+                </button>
+                <button
+                  onClick={() => handleUpdateStatus(order.id, "COMPLETED")}
+                  disabled={updatingId === order.id}
+                  className="flex-1 rounded-xl bg-green-600 py-2.5 text-xs font-bold text-white hover:bg-green-700 transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-sm shadow-green-500/10 disabled:opacity-50"
+                >
+                  <CheckCircle className="h-3.5 w-3.5" /> ເກັບເງິນສຳເລັດ
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <SidebarProvider>
@@ -90,7 +404,7 @@ export function OrdersTrackerPage() {
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
               <BreadcrumbItem>
-                <BreadcrumbPage>ຈັດການອໍເດີ້</BreadcrumbPage>
+                <BreadcrumbPage>ຈັດການອໍເດີ້ປະຈຳໂຕະ</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
@@ -120,11 +434,37 @@ export function OrdersTrackerPage() {
 
         {/* Content */}
         <div className="flex flex-1 flex-col gap-6 p-6">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">ຈັດການອໍເດີ້ປະຈຳໂຕະ</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              ຕິດຕາມການສັ່ງອາຫານ, ປຸງແຕ່ງ ແລະ ເສີບໃຫ້ລູກຄ້າແຕ່ລະໂຕະ
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">ຈັດການອໍເດີ້ປະຈຳໂຕະ (KDS Monitor)</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                ຕິດຕາມການສັ່ງອາຫານ, ປຸງແຕ່ງ ແລະ ເສີບໃຫ້ລູກຄ້າແຕ່ລະໂຕະດ້ວຍລະບົບແບ່ງສິດຂັ້ນຕອນ
+              </p>
+            </div>
+            
+            {/* View Switching Tabs */}
+            <div className="flex bg-slate-100 p-1 rounded-xl w-fit self-start sm:self-auto">
+              <button
+                onClick={() => setViewTab("kds")}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  viewTab === "kds"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                ແຜງຄຸ້ມຄອງ KDS
+              </button>
+              <button
+                onClick={() => setViewTab("history")}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  viewTab === "history"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                ประຫວັດອໍເດີ້
+              </button>
+            </div>
           </div>
 
           {loading ? (
@@ -132,202 +472,190 @@ export function OrdersTrackerPage() {
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary" />
               <p className="text-sm text-muted-foreground">ກຳລັງໂຫລດຂໍ້ມູນອໍເດີ້...</p>
             </div>
-          ) : (
-            <div className="space-y-8">
-              {/* Active Orders Grid */}
-              <div>
-                <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-                    {activeOrders.length}
-                  </span>
-                  ອໍເດີ້ທີ່ກຳລັງດຳເນີນການ
-                </h2>
-
-                {activeOrders.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground bg-background rounded-xl border border-dashed">
-                    <ClipboardList className="h-12 w-12 opacity-30 mb-2" />
-                    <p className="text-sm font-medium">ບໍ່ມີອໍເດີ້ທີ່ກຳລັງລໍຖ້າໃນເວລານີ້</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {activeOrders.map((order) => {
-                      const color = ORDER_STATUS_COLORS[order.status];
-                      return (
-                        <div
-                          key={order.id}
-                          className="bg-background border rounded-xl overflow-hidden shadow-sm flex flex-col justify-between"
-                        >
-                          {/* Card Header */}
-                          <div className="p-4 border-b bg-slate-50/50 flex items-center justify-between">
-                            <div>
-                              <span className="text-xs text-muted-foreground">ອໍເດີ້ #{order.id}</span>
-                              <h3 className="text-base font-extrabold text-slate-800">
-                                ໂຕະ {order.tableNumber}
-                              </h3>
-                            </div>
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${color.bg} ${color.text}`}>
-                              {ORDER_STATUS_LAO[order.status]}
-                            </span>
-                          </div>
-
-                          {/* Items List */}
-                          <div className="p-4 flex-1 space-y-3">
-                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                              ລາຍການອາຫານ
-                            </div>
-                            <div className="divide-y max-h-[200px] overflow-y-auto pr-1">
-                              {order.items.map((item) => (
-                                <div key={item.id} className="py-2 flex items-center justify-between text-sm">
-                                  <div className="flex-1 pr-2">
-                                    <div className="font-medium text-slate-800">{item.product.name}</div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {formatLAK(item.price)}
-                                    </div>
-                                  </div>
-                                  <span className="font-mono font-bold text-slate-600 bg-muted px-2 py-0.5 rounded-md">
-                                    x{item.quantity}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Card Footer */}
-                          <div className="p-4 border-t bg-slate-50/30 space-y-4">
-                            <div className="flex justify-between items-center text-sm">
-                              <span className="text-muted-foreground flex items-center gap-1">
-                                <Clock className="h-3.5 w-3.5" />
-                                {formatDateTime(order.createdAt)}
-                              </span>
-                              <span className="font-extrabold text-slate-900">
-                                {formatLAK(order.totalAmount)}
-                              </span>
-                            </div>
-
-                            {/* Status controls */}
-                            <div className="flex gap-2">
-                              {order.status === "PENDING" && (
-                                <button
-                                  onClick={() => handleUpdateStatus(order.id, "PREPARING")}
-                                  disabled={updatingId === order.id}
-                                  className="w-full rounded-lg bg-primary py-2 text-xs font-bold text-white hover:bg-primary/95 transition-colors cursor-pointer flex items-center justify-center gap-1"
-                                >
-                                  <Coffee className="h-3.5 w-3.5" /> ເລີ່ມປຸງແຕ່ງ
-                                </button>
-                              )}
-                              {order.status === "PREPARING" && (
-                                <button
-                                  onClick={() => handleUpdateStatus(order.id, "SERVED")}
-                                  disabled={updatingId === order.id}
-                                  className="w-full rounded-lg bg-indigo-600 py-2 text-xs font-bold text-white hover:bg-indigo-700 transition-colors cursor-pointer flex items-center justify-center gap-1"
-                                >
-                                  <CheckCircle className="h-3.5 w-3.5" /> ເສີບອາຫານ
-                                </button>
-                              )}
-                              
-                              {order.status === "SERVED" && (
-                                <div className="flex gap-2 w-full">
-                                  <button
-                                    onClick={() => setPrintingOrder(order)}
-                                    className="flex-1 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 py-2 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1"
-                                  >
-                                    <Printer className="h-3.5 w-3.5" /> ພິມບິນ
-                                  </button>
-                                  <button
-                                    onClick={() => handleUpdateStatus(order.id, "COMPLETED")}
-                                    disabled={updatingId === order.id}
-                                    className="flex-1 rounded-lg bg-green-600 py-2 text-xs font-bold text-white hover:bg-green-700 transition-colors cursor-pointer flex items-center justify-center gap-1"
-                                  >
-                                    <CheckCircle className="h-3.5 w-3.5" /> ສຳເລັດ / ເກັບເງິນ
-                                  </button>
-                                </div>
-                              )}
-                              
-                              {order.status !== "SERVED" && order.status !== "COMPLETED" && (
-                                <button
-                                  onClick={() => handleUpdateStatus(order.id, "CANCELLED")}
-                                  disabled={updatingId === order.id}
-                                  className="rounded-lg border border-red-200 text-red-600 hover:bg-red-50 p-2 transition-colors cursor-pointer"
-                                  title="ຍົກເລີກອໍເດີ້"
-                                >
-                                  <XCircle className="h-4 w-4" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+          ) : viewTab === "kds" ? (
+            // ── KDS COLUMN BOARD VIEW ──
+            <div className="flex flex-col gap-6 flex-1">
+              
+              {/* Mobile Column Select Subtabs (Visible only on mobile/tablet) */}
+              <div className="flex lg:hidden bg-slate-50 p-1.5 border rounded-xl w-full justify-between gap-1">
+                <button
+                  onClick={() => setKdsMobileTab("pending")}
+                  className={`flex-1 text-center py-2 text-[10px] font-black rounded-lg transition-all cursor-pointer ${
+                    kdsMobileTab === "pending"
+                      ? "bg-amber-500 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  ອໍເດີ້ໃໝ່ ({pendingOrders.length})
+                </button>
+                <button
+                  onClick={() => setKdsMobileTab("preparing")}
+                  className={`flex-1 text-center py-2 text-[10px] font-black rounded-lg transition-all cursor-pointer ${
+                    kdsMobileTab === "preparing"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  ກຳລັງເຮັດ ({preparingOrders.length})
+                </button>
+                <button
+                  onClick={() => setKdsMobileTab("served")}
+                  className={`flex-1 text-center py-2 text-[10px] font-black rounded-lg transition-all cursor-pointer ${
+                    kdsMobileTab === "served"
+                      ? "bg-green-600 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  ເສີບແລ້ວ ({consolidatedServedOrders.length})
+                </button>
               </div>
 
-              {/* History Orders */}
-              <div>
-                <h2 className="text-lg font-semibold mb-4 text-muted-foreground">ປະຫວັດອໍເດີ້</h2>
-                <div className="rounded-xl border bg-card overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
-                          <th className="px-5 py-3 text-left">ເລກອໍເດີ້</th>
-                          <th className="px-5 py-3 text-left">ໂຕະ</th>
-                          <th className="px-5 py-3 text-left">ເວລາ</th>
-                          <th className="px-5 py-3 text-left">ອາຫານ</th>
-                          <th className="px-5 py-3 text-right">ຍອດລວມ</th>
-                          <th className="px-5 py-3 text-center">...</th>
-                          <th className="px-5 py-3 text-center">ພິມບິນ</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y text-slate-700">
-                        {historyOrders.length === 0 ? (
-                          <tr>
-                            <td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">
-                              ບໍ່ມີປະຫວັດການສັ່ງຊື້
+              {/* Three Column Kanban Layout (Responsive: Grid on desktop, Stack/Tab on mobile) */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 items-start">
+                
+                {/* 1. PENDING COLUMN */}
+                <div className={`flex flex-col gap-4 bg-slate-50/50 border border-slate-100 rounded-2xl p-4 min-h-[300px] lg:min-h-[500px] ${
+                  kdsMobileTab === "pending" ? "flex" : "hidden lg:flex"
+                }`}>
+                  <div className="flex items-center justify-between border-b pb-2 mb-1">
+                    <h2 className="text-xs font-black uppercase text-amber-600 tracking-wider flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                      ອໍເດີ້ໃໝ່ (New Orders)
+                    </h2>
+                    <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {pendingOrders.length}
+                    </span>
+                  </div>
+                  
+                  {pendingOrders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-muted-foreground bg-white border border-dashed rounded-xl flex-1">
+                      <Inbox className="h-10 w-10 opacity-15 mb-2" />
+                      <p className="text-[11px] font-semibold">ບໍ່ມີອໍເດີ້ລໍຖ້າ</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
+                      {pendingOrders.map(renderOrderCard)}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. PREPARING COLUMN */}
+                <div className={`flex flex-col gap-4 bg-slate-50/50 border border-slate-100 rounded-2xl p-4 min-h-[300px] lg:min-h-[500px] ${
+                  kdsMobileTab === "preparing" ? "flex" : "hidden lg:flex"
+                }`}>
+                  <div className="flex items-center justify-between border-b pb-2 mb-1">
+                    <h2 className="text-xs font-black uppercase text-indigo-600 tracking-wider flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
+                      ກຳລັງປຸງແຕ່ງ (Cooking)
+                    </h2>
+                    <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {preparingOrders.length}
+                    </span>
+                  </div>
+                  
+                  {preparingOrders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-muted-foreground bg-white border border-dashed rounded-xl flex-1">
+                      <Inbox className="h-10 w-10 opacity-15 mb-2" />
+                      <p className="text-[11px] font-semibold">ບໍ່ມີອາຫານກຳລັງປຸງແຕ່ງ</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
+                      {preparingOrders.map(renderOrderCard)}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. SERVED COLUMN */}
+                <div className={`flex flex-col gap-4 bg-slate-50/50 border border-slate-100 rounded-2xl p-4 min-h-[300px] lg:min-h-[500px] ${
+                  kdsMobileTab === "served" ? "flex" : "hidden lg:flex"
+                }`}>
+                  <div className="flex items-center justify-between border-b pb-2 mb-1">
+                    <h2 className="text-xs font-black uppercase text-green-600 tracking-wider flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                      ເສີບແລ້ວ / ລໍຖ້າເຊັກບິນ (Served)
+                    </h2>
+                    <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {consolidatedServedOrders.length}
+                    </span>
+                  </div>
+                  
+                  {consolidatedServedOrders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-muted-foreground bg-white border border-dashed rounded-xl flex-1">
+                      <Inbox className="h-10 w-10 opacity-15 mb-2" />
+                      <p className="text-[11px] font-semibold">ບໍ່ມີອໍເດີ້ລໍຖ້າເຊັກບິນ</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
+                      {consolidatedServedOrders.map(renderOrderCard)}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          ) : (
+            // ── HISTORY COMPLETED/CANCELLED VIEW ──
+            <div className="rounded-xl border bg-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="px-5 py-3 text-left">ເລກອໍເດີ້</th>
+                      <th className="px-5 py-3 text-left">ໂຕະ</th>
+                      <th className="px-5 py-3 text-left">ເວລາ</th>
+                      <th className="px-5 py-3 text-left">ອາຫານ</th>
+                      <th className="px-5 py-3 text-right">ຍອດລວມ</th>
+                      <th className="px-5 py-3 text-center">ສະຖານະ</th>
+                      <th className="px-5 py-3 text-center">ພິມບິນ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y text-slate-700">
+                    {historyOrders.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">
+                          ບໍ່ມີປະຫວັດການສັ່ງຊື້
+                        </td>
+                      </tr>
+                    ) : (
+                      historyOrders.map((order) => {
+                        const color = ORDER_STATUS_COLORS[order.status];
+                        return (
+                          <tr key={order.id} className="hover:bg-muted/10 transition-colors">
+                            <td className="px-5 py-3 font-mono text-xs text-muted-foreground">
+                              #{order.id}
+                            </td>
+                            <td className="px-5 py-3 font-bold">
+                              ໂຕະ {order.tableNumber}
+                            </td>
+                            <td className="px-5 py-3 text-muted-foreground">
+                              {formatDateTime(order.createdAt)}
+                            </td>
+                            <td className="px-5 py-3 max-w-[250px] truncate font-semibold text-xs">
+                              {order.items.map((i) => `${i.product.name} (x${i.quantity})`).join(", ")}
+                            </td>
+                            <td className="px-5 py-3 text-right font-semibold">
+                              {formatLAK(order.totalAmount)}
+                            </td>
+                            <td className="px-5 py-3 text-center">
+                              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${color.bg} ${color.text}`}>
+                                {ORDER_STATUS_LAO[order.status]}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 text-center">
+                              <button
+                                onClick={() => setPrintingOrder(order)}
+                                className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-primary transition-colors cursor-pointer flex items-center justify-center mx-auto"
+                                title="ພິມບິນ"
+                              >
+                                <Printer className="h-4 w-4" />
+                              </button>
                             </td>
                           </tr>
-                        ) : (
-                          historyOrders.map((order) => {
-                            const color = ORDER_STATUS_COLORS[order.status];
-                            return (
-                              <tr key={order.id} className="hover:bg-muted/10 transition-colors">
-                                <td className="px-5 py-3 font-mono text-xs text-muted-foreground">
-                                  #{order.id}
-                                </td>
-                                <td className="px-5 py-3 font-bold">
-                                  ໂຕະ {order.tableNumber}
-                                </td>
-                                <td className="px-5 py-3 text-muted-foreground">
-                                  {formatDateTime(order.createdAt)}
-                                </td>
-                                <td className="px-5 py-3 max-w-[250px] truncate">
-                                  {order.items.map((i) => `${i.product.name} (x${i.quantity})`).join(", ")}
-                                </td>
-                                <td className="px-5 py-3 text-right font-semibold">
-                                  {formatLAK(order.totalAmount)}
-                                </td>
-                                <td className="px-5 py-3 text-center">
-                                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${color.bg} ${color.text}`}>
-                                    {ORDER_STATUS_LAO[order.status]}
-                                  </span>
-                                </td>
-                                <td className="px-5 py-3 text-center">
-                                  <button
-                                    onClick={() => setPrintingOrder(order)}
-                                    className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-primary transition-colors cursor-pointer flex items-center justify-center mx-auto"
-                                    title="ພິມບິນ"
-                                  >
-                                    <Printer className="h-4 w-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -335,149 +663,173 @@ export function OrdersTrackerPage() {
       </SidebarInset>
 
       {/* ── Receipt Print Modal ── */}
-      {printingOrder && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4" id="modal-receipt-container">
-          <div className="bg-white border rounded-2xl w-full max-w-sm shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200">
-            {/* Header Controls */}
-            <div className="flex items-center justify-between border-b p-4 shrink-0 bg-slate-50">
-              <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                <Printer className="h-4 w-4 text-primary" /> ຕົວຢ່າງບິນເກັບເງິນ
-              </span>
-              <button
-                onClick={() => setPrintingOrder(null)}
-                className="h-7 w-7 rounded-full hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+      {(() => {
+        if (!printingOrder) return null;
 
-            {/* Printable Area */}
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-100 flex justify-center">
-              {/* POS Bill Slip Design */}
-              <div
-                id="printable-receipt"
-                className="bg-white text-black p-4 shadow-md w-full max-w-[105mm] text-[10px] border border-slate-200 leading-normal"
-                style={{ fontFamily: "'Noto Sans Lao', sans-serif", fontSize: "9px" }}
-              >
-                {/* Store Info */}
-                <div className="text-center space-y-1 mb-2">
-                  <h3 className="font-extrabold text-xs uppercase">ຮ້ານອາຫານ ແສນສະບາຍ</h3>
-                  <p className="text-[9px] text-slate-600">ຖະໜົນລ້ານຊ້າງ, ວຽງຈັນ</p>
-                  <p className="text-[9px] text-slate-600">Tel: 020 5555 9999</p>
-                  <div className="border-b border-dashed border-black/30 my-1.5" />
-                  <h4 className="font-bold text-[10px] tracking-widest mt-0.5">ບິນເກັບເງິນ / RECEIPT</h4>
-                </div>
+        // Find all sibling orders of the same table session to show on receipt slip
+        const printSessionOrders = printingOrder.status === "COMPLETED" || printingOrder.status === "CANCELLED"
+          ? [printingOrder]
+          : orders.filter(
+              (o) =>
+                o.tableNumber.trim().toLowerCase() === printingOrder.tableNumber.trim().toLowerCase() &&
+                o.status !== "COMPLETED" &&
+                o.status !== "CANCELLED"
+            );
 
-                {/* Metadata */}
-                <div className="space-y-1 text-[9px] mb-2">
-                  <div className="flex justify-between">
-                    <span>ເລກໂຕະ / Table:</span>
-                    <span className="font-bold">ໂຕະ {printingOrder.tableNumber}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>ເລກອໍເດີ້ / Bill No:</span>
-                    <span>#{printingOrder.id}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>ວັນທີ / Date:</span>
-                    <span>
-                      {formatDateTime(printingOrder.createdAt)}
-                    </span>
-                  </div>
-                  <div className="border-b border-dashed border-black/30 my-1.5" />
-                </div>
+        // Group same products and sum their quantities
+        const printItemsMap: Record<number, { name: string; quantity: number; price: number }> = {};
+        printSessionOrders.forEach((order) => {
+          order.items.forEach((item) => {
+            if (printItemsMap[item.productId]) {
+              printItemsMap[item.productId].quantity += item.quantity;
+            } else {
+              printItemsMap[item.productId] = {
+                name: item.product.name,
+                quantity: item.quantity,
+                price: item.price,
+              };
+            }
+          });
+        });
+        const printItems = Object.values(printItemsMap);
+        const printTotalAmount = printSessionOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+        const earliestCreatedAt = printSessionOrders.reduce((min, o) => {
+          return new Date(o.createdAt).getTime() < new Date(min).getTime() ? o.createdAt : min;
+        }, printingOrder.createdAt);
 
-                {/* Items */}
-                <div className="space-y-2 mb-2">
-                  {printingOrder.items.map((item) => (
-                    <div key={item.id} className="text-[9px]">
-                      <div className="flex justify-between font-bold">
-                        <span className="truncate max-w-[75%]">{item.product.name}</span>
-                        <span>x{item.quantity}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-600">
-                        <span>@ {formatLAK(item.price)}</span>
-                        <span>{formatLAK(item.price * item.quantity)}</span>
-                      </div>
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4" id="modal-receipt-container">
+            <div className="bg-white border rounded-2xl w-full max-w-sm shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200">
+              {/* Header Controls */}
+              <div className="flex items-center justify-between border-b p-4 shrink-0 bg-slate-50">
+                <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <Printer className="h-4 w-4 text-primary" /> ຕົວຢ່າງບິນເກັບເງິນ
+                </span>
+                <button
+                  onClick={() => setPrintingOrder(null)}
+                  className="h-7 w-7 rounded-full hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Printable Area */}
+              <div className="flex-1 overflow-y-auto p-6 bg-slate-100 flex justify-center">
+                {/* POS Bill Slip Design */}
+                <div
+                  id="printable-receipt"
+                  className="bg-white text-black p-4 shadow-md w-full max-w-[105mm] text-[10px] border border-slate-200 leading-normal"
+                  style={{ fontFamily: "'Noto Sans Lao', sans-serif", fontSize: "9px" }}
+                >
+                  {/* Store Info */}
+                  <div className="text-center space-y-1 mb-2">
+                    <h3 className="font-extrabold text-xs uppercase">ຮ້ານອາຫານ ແສນສະບາຍ</h3>
+                    <p className="text-[9px] text-slate-600">ຖະໜົນລ້ານຊ້າງ, ວຽງຈັນ</p>
+                    <p className="text-[9px] text-slate-600">Tel: 020 5555 9999</p>
+                    <div className="border-b border-dashed border-black/30 my-1.5" />
+                    <h4 className="font-bold text-[10px] tracking-widest mt-0.5">ບິນເກັບເງິນ / RECEIPT</h4>
+                  </div>
+
+                  {/* Metadata */}
+                  <div className="space-y-1 text-[9px] mb-2">
+                    <div className="flex justify-between">
+                      <span>ເລກໂຕະ / Table:</span>
+                      <span className="font-bold">ໂຕະ {printingOrder.tableNumber}</span>
                     </div>
-                  ))}
-                  <div className="border-b border-dashed border-black/30 my-1.5 pt-0.5" />
-                </div>
-
-                {/* Totals */}
-                <div className="space-y-1.5 text-[10px] mb-4">
-                  <div className="flex justify-between font-extrabold text-xs border-t border-dashed pt-1.5">
-                    <span>ຍອດລວມ / TOTAL:</span>
-                    <span>{formatLAK(printingOrder.totalAmount)}</span>
+                    <div className="flex justify-between">
+                      <span>ເລກອໍເດີ້ / Bill No:</span>
+                      <span>
+                        {printSessionOrders.length === 1 ? `#${printingOrder.id}` : printSessionOrders.map((o) => `#${o.id}`).join("+")}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>ວັນທີ / Date:</span>
+                      <span>
+                        {formatDateTime(earliestCreatedAt)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="border-b border-dashed border-black/30 my-1.5" />
-                </div>
 
-                {/* Message */}
-                <div className="text-center text-[9px] space-y-0.5 mt-2">
-                  <p className="font-bold">ຂໍຂອບໃຈທີ່ມາອຸດໜູນ</p>
-                  <p className="uppercase">Thank you & see you again</p>
-                  <p className="text-[8px] text-slate-400 pt-1">Powered by Antigravity POS</p>
+                  <div className="border-b border-dashed border-black/30 my-1.5" />
+
+                  {/* Bill Items Header */}
+                  <div className="grid grid-cols-12 font-bold text-slate-700 mb-1">
+                    <span className="col-span-6">ລາຍການ / Item</span>
+                    <span className="col-span-2 text-center">ຈຳນວນ / Qty</span>
+                    <span className="col-span-4 text-right">ລາຄາ / Amt</span>
+                  </div>
+
+                  {/* Bill Items List */}
+                  <div className="space-y-1.5 my-1">
+                    {printItems.map((item, idx) => (
+                      <div key={idx} className="grid grid-cols-12 text-slate-800 text-[9px]">
+                        <span className="col-span-6">{item.name}</span>
+                        <span className="col-span-2 text-center font-mono">{item.quantity}</span>
+                        <span className="col-span-4 text-right font-mono">{formatLAK(item.price * item.quantity)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="border-b border-dashed border-black/30 my-2" />
+
+                  {/* Billing Summary */}
+                  <div className="space-y-1 text-[10px]">
+                    <div className="flex justify-between font-extrabold text-slate-900 text-xs">
+                      <span>ຍອດລວມທັງໝົດ / TOTAL:</span>
+                      <span className="font-mono">{formatLAK(printTotalAmount)}</span>
+                    </div>
+                  </div>
+
+                  <div className="border-b border-dashed border-black/30 my-2" />
+
+                  {/* Thanks footer */}
+                  <div className="text-center text-[8px] text-slate-500 space-y-0.5 mt-2">
+                    <p className="font-bold">ຂອບໃຈທີ່ມາອຸດໜູນ / THANK YOU</p>
+                    <p>ກະລຸນາກວດສອບເງິນທອນກ່ອນອອກຈາກຮ້ານ</p>
+                  </div>
                 </div>
+              </div>
+
+              {/* Print Action Footer */}
+              <div className="border-t p-4 shrink-0 bg-slate-50 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPrintingOrder(null)}
+                  className="flex-1 rounded-xl border bg-white py-3 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+                >
+                  ຍົກເລີກ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTriggerPrint}
+                  className="flex-1 rounded-xl bg-primary py-3 text-xs font-bold text-white hover:bg-primary/95 transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="h-4 w-4" /> ພິມບິນ
+                </button>
               </div>
             </div>
 
-            {/* Print trigger footer controls */}
-            <div className="border-t p-4 shrink-0 bg-slate-50 flex gap-3">
-              <button
-                type="button"
-                onClick={() => setPrintingOrder(null)}
-                className="flex-1 rounded-xl border bg-white py-3 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
-              >
-                ຍົກເລີກ
-              </button>
-              <button
-                onClick={handleTriggerPrint}
-                className="flex-1 rounded-xl bg-primary py-3 text-xs font-bold text-white hover:bg-primary/95 transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Printer className="h-4 w-4" /> ພິມບິນເກັບເງິນ
-              </button>
-            </div>
+            {/* Centering receipt preview styles */}
+            <style dangerouslySetInnerHTML={{ __html: `
+              @page { size: auto; margin: 10mm; }
+              @media print {
+                body { background: white !important; margin: 0 !important; padding: 0 !important; }
+                body * { visibility: hidden !important; }
+                #printable-receipt, #printable-receipt * { visibility: visible !important; }
+                #printable-receipt {
+                  position: absolute !important;
+                  left: 50% !important; top: 0 !important;
+                  transform: translateX(-50%) !important;
+                  width: 100% !important; max-width: 58mm !important;
+                  margin: 0 !important; padding: 4px !important;
+                  border: none !important;
+                  box-shadow: none !important;
+                }
+              }
+            `}} />
           </div>
-
-          {/* Inline styles for media printing to target #printable-receipt only */}
-          <style dangerouslySetInnerHTML={{ __html: `
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Lao:wght@400;700&display=swap');
-            @page {
-              size: auto;
-              margin: 10mm;
-            }
-            @media print {
-              body {
-                background: white !important;
-                margin: 0 !important;
-                padding: 0 !important;
-              }
-              body * {
-                visibility: hidden !important;
-              }
-              #printable-receipt, #printable-receipt * {
-                visibility: visible !important;
-                font-family: 'Noto Sans Lao', sans-serif !important;
-              }
-              #printable-receipt {
-                position: absolute !important;
-                left: 50% !important;
-                top: 0 !important;
-                transform: translateX(-50%) !important;
-                width: 100% !important;
-                max-width: 105mm !important;
-                margin: 0 !important;
-                padding: 10px !important;
-                border: none !important;
-                box-shadow: none !important;
-                background: white !important;
-                color: black !important;
-              }
-            }
-          `}} />
-        </div>
-      )}
+        );
+      })()}
     </SidebarProvider>
   );
 }

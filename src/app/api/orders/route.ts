@@ -78,23 +78,82 @@ export async function POST(request: Request) {
       });
     }
 
-    // 3. ສ້າງ Order ແລະ OrderItems
-    const order = await db.order.create({
-      data: {
-        tableNumber,
+    // 3. Check for existing PENDING order to merge, otherwise create new
+    const existingPendingOrder = await db.order.findFirst({
+      where: {
+        tableNumber: tableNumber,
         status: "PENDING",
-        totalAmount,
-        items: {
-          create: itemsData,
-        },
       },
       include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
+        items: true,
       },
+    });
+
+    const order = await db.$transaction(async (tx) => {
+      if (existingPendingOrder) {
+        // Merge items
+        for (const item of itemsData) {
+          const existingItem = existingPendingOrder.items.find(
+            (i) => i.productId === item.productId
+          );
+
+          if (existingItem) {
+            await tx.orderItem.update({
+              where: { id: existingItem.id },
+              data: {
+                quantity: {
+                  increment: item.quantity,
+                },
+              },
+            });
+          } else {
+            await tx.orderItem.create({
+              data: {
+                orderId: existingPendingOrder.id,
+                productId: item.productId,
+                quantity: item.quantity,
+                price: item.price,
+              },
+            });
+          }
+        }
+
+        // Update totalAmount
+        return tx.order.update({
+          where: { id: existingPendingOrder.id },
+          data: {
+            totalAmount: {
+              increment: totalAmount,
+            },
+          },
+          include: {
+            items: {
+              include: {
+                product: true,
+              },
+            },
+          },
+        });
+      } else {
+        // Create new order
+        return tx.order.create({
+          data: {
+            tableNumber,
+            status: "PENDING",
+            totalAmount,
+            items: {
+              create: itemsData,
+            },
+          },
+          include: {
+            items: {
+              include: {
+                product: true,
+              },
+            },
+          },
+        });
+      }
     });
 
     return NextResponse.json(order, { status: 201 });

@@ -25,6 +25,8 @@ export interface OrderItem {
   quantity: number;
   price: number;
   product: Product;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Order {

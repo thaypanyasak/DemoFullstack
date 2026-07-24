@@ -56,6 +56,23 @@ export async function PUT(
         }
       }
 
+      if (status === "COMPLETED") {
+        await tx.order.updateMany({
+          where: {
+            tableNumber: currentOrder.tableNumber,
+            status: {
+              in: ["PENDING", "PREPARING", "SERVED"],
+            },
+            id: {
+              not: orderId,
+            },
+          },
+          data: {
+            status: "COMPLETED",
+          },
+        });
+      }
+
       return tx.order.update({
         where: { id: orderId },
         data: { status },

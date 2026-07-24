@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useState, useEffect } from "react"
 import {
   LayoutDashboard,
   UtensilsCrossed,
@@ -11,9 +12,11 @@ import {
   Store,
   QrCode,
   Tags,
+  Users,
 } from "lucide-react"
 
 import { SearchForm } from "@/components/search-form"
+import { supabase } from "@/lib/supabase"
 import {
   Sidebar,
   SidebarContent,
@@ -63,11 +66,56 @@ const navMain = [
         url: "/dashboard/tables",
         icon: QrCode,
       },
+      {
+        title: "ຈັດການພະນັກງານ",
+        url: "/dashboard/staff",
+        icon: Users,
+      },
     ],
   },
 ]
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const [role, setRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchUserRole = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setRole(session.user.user_metadata?.role || "STAFF");
+      }
+    };
+    fetchUserRole();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setRole(session.user.user_metadata?.role || "STAFF");
+      } else {
+        setRole(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const filteredNavMain = React.useMemo(() => {
+    if (role === "STAFF") {
+      return [
+        {
+          title: "ຈັດການຮ້ານອາຫານ",
+          items: [
+            {
+              title: "ຈັດການອໍເດີ້",
+              url: "/dashboard/orders",
+              icon: ClipboardList,
+            },
+          ],
+        },
+      ];
+    }
+    return navMain;
+  }, [role]);
+
   return (
     <Sidebar {...props}>
       {/* Header */}
@@ -85,7 +133,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
       {/* Navigation */}
       <SidebarContent>
-        {navMain.map((group) => (
+        {filteredNavMain.map((group) => (
           <SidebarGroup key={group.title}>
             <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -115,7 +163,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton render={<a href="#" />} className="text-destructive hover:text-destructive">
+            <SidebarMenuButton
+              onClick={() => supabase.auth.signOut()}
+              className="text-destructive hover:text-destructive cursor-pointer w-full"
+            >
               <LogOut className="h-4 w-4" />
               ອອກຈາກລະບົບ
             </SidebarMenuButton>
