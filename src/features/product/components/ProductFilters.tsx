@@ -1,12 +1,13 @@
 "use client";
 
-import { CAT_LAO, CATEGORIES } from "@/types/product";
+import type { Category } from "@/types/category";
 
 interface Props {
   search: string;
   selectedCategory: string;
   onSearchChange: (v: string) => void;
   onCategoryChange: (v: string) => void;
+  categories: Category[];
 }
 
 export function ProductFilters({
@@ -14,6 +15,7 @@ export function ProductFilters({
   selectedCategory,
   onSearchChange,
   onCategoryChange,
+  categories,
 }: Props) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center rounded-xl border bg-card p-4 shadow-sm">
@@ -34,7 +36,7 @@ export function ProductFilters({
         </svg>
         <input
           type="text"
-          placeholder="ຄົ້ນຫາສິນຄ້າ..."
+          placeholder="ຄົ້ນຫາອາຫານ..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           className="w-full rounded-lg border bg-background pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
@@ -48,9 +50,9 @@ export function ProductFilters({
         className="rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
       >
         <option value="All">ທຸກປະເພດ</option>
-        {CATEGORIES.map((cat) => (
-          <option key={cat} value={cat}>
-            {CAT_LAO[cat] || cat}
+        {categories.map((cat) => (
+          <option key={cat.id} value={cat.id.toString()}>
+            {cat.nameLao}
           </option>
         ))}
       </select>

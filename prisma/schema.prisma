@@ -6,13 +6,46 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique // e.g. "foods", "drinks"
+  nameLao   String    // e.g. "ອາຫານຫຼັກ", "ເຄື່ອງດື່ມ"
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
 model Product {
-  id          Int      @id @default(autoincrement())
+  id          Int         @id @default(autoincrement())
   name        String
   description String
   price       Float
-  stock       Int
-  category    String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  stock       Int?        // Null = ບໍ່ຈຳກັດຈຳນວນ (ພ້ອມເສີບຕະຫຼອດ)
+  status      Boolean     @default(true) // true = ເປີດຂາຍ, false = ປິດຂາຍ
+  categoryId  Int?
+  category    Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  image       String?     // ຮູບພາບອາຫານ (URL ພາຍນອກ ຫຼື ພາຍໃນ /uploads/)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  orderItems  OrderItem[]
+}
+
+model Order {
+  id          Int         @id @default(autoincrement())
+  tableNumber String      // ເລກໂຕະ (ເຊັ່ນ: "05", "12")
+  status      String      // "PENDING", "PREPARING", "SERVED", "COMPLETED", "CANCELLED"
+  totalAmount Float
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  items       OrderItem[]
+}
+
+model OrderItem {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Float
 }

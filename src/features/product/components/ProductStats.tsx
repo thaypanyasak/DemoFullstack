@@ -6,41 +6,44 @@ interface Props {
 }
 
 export function ProductStats({ products }: Props) {
-  const totalValue = products.reduce((acc, p) => acc + p.price * p.stock, 0);
-  const lowStockCount = products.filter((p) => p.stock <= 5).length;
+  const activeCount = products.filter((p) => p.status).length;
+  const inactiveCount = products.filter((p) => !p.status).length;
+  const avgPrice = products.length > 0 
+    ? products.reduce((acc, p) => acc + p.price, 0) / products.length 
+    : 0;
 
   return (
     <div className="grid gap-4 md:grid-cols-3">
       <div className="rounded-xl border bg-card p-5 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          ສິນຄ້າທັງໝົດ
+          ລາຍການເມນູທັງໝົດ
         </p>
         <h3 className="mt-2 text-3xl font-extrabold text-primary">{products.length}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">ລາຍການໃນສາງ</p>
+        <p className="mt-1 text-xs text-muted-foreground">ລາຍການອາຫານ ແລະ ເຄື່ອງດື່ມ</p>
       </div>
 
       <div className="rounded-xl border bg-card p-5 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          ມູນຄ່າທັງໝົດ
+          ເປີດຂາຍຢູ່ (Active)
         </p>
-        <h3 className="mt-2 text-3xl font-extrabold text-emerald-600">
-          {formatLAKShort(totalValue)}
+        <h3 className="mt-2 text-3xl font-extrabold text-green-600">
+          {activeCount}
         </h3>
-        <p className="mt-1 text-xs text-muted-foreground">ລາຄາ × ຈໍານວນ</p>
+        <p className="mt-1 text-xs text-muted-foreground">ພ້ອມໃຫ້ລູກຄ້າສັ່ງໄດ້ທັນທີ</p>
       </div>
 
       <div className="rounded-xl border bg-card p-5 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          ໃກ້ໝົດ <span className="text-red-500">(≤ 5)</span>
+          ປິດຂາຍຊົ່ວຄາວ (Inactive)
         </p>
         <h3
           className={`mt-2 text-3xl font-extrabold ${
-            lowStockCount > 0 ? "text-amber-500" : "text-muted-foreground"
+            inactiveCount > 0 ? "text-red-500" : "text-muted-foreground"
           }`}
         >
-          {lowStockCount}
+          {inactiveCount}
         </h3>
-        <p className="mt-1 text-xs text-muted-foreground">ຕ້ອງສັ່ງຊື້ເພີ່ມ</p>
+        <p className="mt-1 text-xs text-muted-foreground">ອາຫານໝົດ ຫຼື ວັດຖຸດິບໝົດ</p>
       </div>
     </div>
   );

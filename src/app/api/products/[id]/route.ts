@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-// Cập nhật thông tin sản phẩm
+// ອັບເດດຂໍ້ມູນອາຫານ
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -11,23 +11,26 @@ export async function PUT(
     const productId = parseInt(id);
     if (isNaN(productId)) {
       return NextResponse.json(
-        { error: "ID sản phẩm không hợp lệ" },
+        { error: "ID ອາຫານບໍ່ຖືກຕ້ອງ" },
         { status: 400 }
       );
     }
 
     const body = await request.json();
-    const { name, description, price, stock, category } = body;
+    const { name, description, price, categoryId, image, status } = body;
 
-    // Kiểm tra và cập nhật
     const updatedProduct = await db.product.update({
       where: { id: productId },
       data: {
-        name,
-        description: description ?? undefined,
+        name: name !== undefined ? name : undefined,
+        description: description !== undefined ? (description || "") : undefined,
         price: price !== undefined ? parseFloat(price) : undefined,
-        stock: stock !== undefined ? parseInt(stock) : undefined,
-        category: category ?? undefined,
+        status: status !== undefined ? status : undefined,
+        categoryId: categoryId !== undefined ? (categoryId ? parseInt(categoryId) : null) : undefined,
+        image: image !== undefined ? (image || null) : undefined,
+      },
+      include: {
+        category: true,
       },
     });
 
@@ -35,13 +38,13 @@ export async function PUT(
   } catch (error) {
     console.error("PUT Product Error:", error);
     return NextResponse.json(
-      { error: "Lỗi khi cập nhật thông tin sản phẩm" },
+      { error: "ເກີດຂໍ້ຜິດພາດໃນການອັບເດດຂໍ້ມູນອາຫານ" },
       { status: 500 }
     );
   }
 }
 
-// Xóa sản phẩm
+// ລຶບອາຫານ
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -51,7 +54,7 @@ export async function DELETE(
     const productId = parseInt(id);
     if (isNaN(productId)) {
       return NextResponse.json(
-        { error: "ID sản phẩm không hợp lệ" },
+        { error: "ID ອາຫານບໍ່ຖືກຕ້ອງ" },
         { status: 400 }
       );
     }
@@ -60,11 +63,11 @@ export async function DELETE(
       where: { id: productId },
     });
 
-    return NextResponse.json({ message: "Xóa sản phẩm thành công" });
+    return NextResponse.json({ message: "ລຶບອາຫານສໍາເລັດ" });
   } catch (error) {
     console.error("DELETE Product Error:", error);
     return NextResponse.json(
-      { error: "Lỗi khi xóa sản phẩm" },
+      { error: "ເກີດຂໍ້ຜິດພາດໃນການລຶບອາຫານ" },
       { status: 500 }
     );
   }

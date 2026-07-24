@@ -11,11 +11,11 @@ import type { Product, ProductPayload } from "@/types/product";
 
 const BASE = "/api/products";
 
-/** GET /api/products?query=...&category=... */
-export async function fetchProducts(query = "", category = "All"): Promise<Product[]> {
+/** GET /api/products?query=...&categoryId=... */
+export async function fetchProducts(query = "", categoryId = "All"): Promise<Product[]> {
   const url = new URL(BASE, window.location.origin);
   if (query) url.searchParams.append("query", query);
-  if (category !== "All") url.searchParams.append("category", category);
+  if (categoryId !== "All") url.searchParams.append("categoryId", categoryId);
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error("ເກີດຂໍ້ຜິດພາດໃນການໂຫລດຂໍ້ມູນ");
   return res.json();

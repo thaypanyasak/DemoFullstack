@@ -1,30 +1,118 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ShoppingBag, Search, Package, ArrowRight, Eye, ShoppingCart } from "lucide-react";
-import { formatLAK, formatLAKShort } from "@/lib/format";
-import { CATEGORIES, CAT_LAO } from "@/types/product";
+import { ShoppingBag, Search, Package, ArrowRight, Eye, ShoppingCart, Clock, Utensils, CheckCircle2, ChevronRight, Plus, Minus, X, Trash2 } from "lucide-react";
+import { formatLAK } from "@/lib/format";
 import type { Product } from "@/types/product";
+import type { Category } from "@/types/category";
+import type { Order } from "@/types/order";
+import { createOrder } from "@/features/order/api/orders.api";
+import { fetchCategories } from "@/features/category/api/categories.api";
+import { supabase } from "@/lib/supabase";
+
+// Helper to assign cute food emojis based on category name
+function getCategoryEmoji(name: string, nameLao: string): string {
+  const lower = (name + " " + nameLao).toLowerCase();
+  if (lower.includes("food") || lower.includes("ອາຫານ")) return "🍜";
+  if (lower.includes("drink") || lower.includes("ເຄື່ອງດື່ມ") || lower.includes("ເບຍ")) return "🍹";
+  if (lower.includes("dessert") || lower.includes("ຂອງຫວານ") || lower.includes("ເຄັກ")) return "🍰";
+  if (lower.includes("snack") || lower.includes("ອາຫານວ່າງ") || lower.includes("ຂອງກິນຫຼິ້ນ")) return "🍟";
+  if (lower.includes("soup") || lower.includes("ແກງ") || lower.includes("ຕົ້ມ")) return "🍲";
+  return "🍽️";
+}
 
 export function ShopPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   
-  // Giỏ hàng giả lập (Client-side state)
+  // Table info
+  const [tableNumber, setTableNumber] = useState<string | null>(null);
+  const [isTableModalOpen, setIsTableModalOpen] = useState(false);
+  
+  // Shopping Cart state
   const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [ordering, setOrdering] = useState(false);
 
-  // Xem chi tiết sản phẩm
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  // Active orders tracking for this table
+  const [activeTableOrders, setActiveTableOrders] = useState<Order[]>([]);
 
+  // View details modal
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // 1. Detect Table Number and Fetch Categories on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const table = params.get("table");
+      if (table) {
+        setTableNumber(table);
+      } else {
+        setIsTableModalOpen(true);
+      }
+    }
+    
+    // Fetch Categories
+    fetchCategories()
+      .then(setCategories)
+      .catch((err) => console.error("Error loading categories:", err));
+  }, []);
+
+  // 2. Fetch active orders for this table to track status
+  const fetchActiveOrders = async () => {
+    if (!tableNumber) return;
+    try {
+      const res = await fetch("/api/orders");
+      if (res.ok) {
+        const allOrders: Order[] = await res.json();
+        const filtered = allOrders.filter(
+          (o) => o.tableNumber === tableNumber && o.status !== "COMPLETED" && o.status !== "CANCELLED"
+        );
+        setActiveTableOrders(filtered);
+      }
+    } catch (err) {
+      console.error("Error fetching table orders:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (tableNumber) {
+      fetchActiveOrders();
+
+      // Subscribe to postgres changes on the Order table in real-time
+      const channel = supabase
+        .channel("shop-realtime-orders")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "Order" },
+          () => {
+            // Re-fetch table orders when database updates occur (e.g. kitchen completes/updates status)
+            fetchActiveOrders();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [tableNumber]);
+
+  // 3. Fetch products list
   const fetchProducts = async () => {
     setLoading(true);
     try {
       const url = new URL("/api/products", window.location.origin);
       if (search) url.searchParams.append("query", search);
-      if (selectedCategory !== "All") url.searchParams.append("category", selectedCategory);
+      if (selectedCategory !== "All") url.searchParams.append("categoryId", selectedCategory);
       const res = await fetch(url.toString());
       if (res.ok) {
         setProducts(await res.json());
@@ -41,21 +129,34 @@ export function ShopPage() {
     return () => clearTimeout(t);
   }, [search, selectedCategory]);
 
-  const addToCart = (product: Product) => {
-    if (product.stock === 0) return;
+  // 4. Cart actions
+  const getCartItemQty = (productId: number) => {
+    return cart.find((item) => item.product.id === productId)?.quantity || 0;
+  };
+
+  const handleAddOne = (product: Product) => {
+    if (!product.status) return;
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
         return prev.map((item) =>
           item.product.id === product.id
-            ? { ...item, quantity: Math.min(item.quantity + 1, product.stock) }
+            ? { ...item, quantity: item.quantity + 1 }
             : item
         );
       }
       return [...prev, { product, quantity: 1 }];
     });
-    // Hiệu ứng mở giỏ hàng nhanh
-    setIsCartOpen(true);
+  };
+
+  const handleMinusOne = (productId: number) => {
+    setCart((prev) =>
+      prev
+        .map((item) =>
+          item.product.id === productId ? { ...item, quantity: item.quantity - 1 } : item
+        )
+        .filter((item) => item.quantity > 0)
+    );
   };
 
   const updateCartQty = (productId: number, qty: number) => {
@@ -68,343 +169,510 @@ export function ShopPage() {
     );
   };
 
+  const handlePlaceOrder = async () => {
+    if (!tableNumber) {
+      showToast("ກະລຸນາເລືອກໂຕະກ່ອນສັ່ງອາຫານ", "error");
+      return;
+    }
+    if (cart.length === 0) return;
+
+    setOrdering(true);
+    try {
+      const payload = {
+        tableNumber,
+        items: cart.map((c) => ({
+          productId: c.product.id,
+          quantity: c.quantity,
+        })),
+      };
+
+      await createOrder(payload);
+      showToast("ສົ່ງອໍເດີ້ອາຫານສໍາເລັດ! ຫ້ອງຄົວກຳລັງກະກຽມໃຫ້ທ່ານ.");
+      setCart([]);
+      setIsCartOpen(false);
+      fetchActiveOrders();
+    } catch (err: any) {
+      showToast(err.message || "ເກີດຂໍ້ຜິດພາດໃນການສັ່ງອາຫານ", "error");
+    } finally {
+      setOrdering(false);
+    }
+  };
+
   const totalCartItems = cart.reduce((acc, item) => acc + item.quantity, 0);
   const totalCartPrice = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
 
+  const statusLaoMap: Record<string, string> = {
+    PENDING: "ລໍຖ້າຄິວ ⏳",
+    PREPARING: "ກຳລັງເຮັດ 👨‍🍳",
+    SERVED: "ເສີບແລ້ວ 🍜",
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* ── Navbar ── */}
-      <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground flex shadow-md">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans pb-28 text-slate-800">
+      {/* Toast Alert */}
+      {toast && (
+        <div
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full bg-slate-900/90 text-white px-5 py-3 shadow-xl text-xs font-semibold backdrop-blur-sm animate-in fade-in slide-in-from-top-4 duration-200 border border-white/10`}
+        >
+          {toast.type === "success" ? "✨" : "❌"} {toast.message}
+        </div>
+      )}
+
+      {/* ── Mobile Header ── */}
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-100 px-4 py-3 shadow-sm flex flex-col gap-3 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-amber-500 to-orange-600 text-white flex shadow-md">
               <ShoppingBag className="h-5 w-5" />
             </div>
-            <span className="text-lg font-bold tracking-tight text-slate-800">Cửa hàng Pro</span>
+            <div>
+              <h1 className="text-base font-extrabold tracking-tight text-slate-900 leading-tight">
+                {tableNumber ? `ໂຕະ ${tableNumber}` : "ສັ່ງອາຫານປະຈຳໂຕະ"}
+              </h1>
+              <p className="text-[10px] text-muted-foreground font-semibold flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                ເມນູອາຫານອອນລາຍ
+              </p>
+            </div>
           </div>
 
-          {/* Cart Trigger */}
-          <div className="flex items-center gap-4">
-            <a
-              href="/dashboard"
-              className="text-xs font-semibold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 border px-2.5 py-1.5 rounded-lg bg-background hover:bg-muted"
-            >
-              ລະບົບຈັດການສາງ (Admin) <ArrowRight className="h-3 w-3" />
-            </a>
-            
-            <button
-              onClick={() => setIsCartOpen(!isCartOpen)}
-              className="relative flex h-10 w-10 items-center justify-center rounded-full border bg-background text-foreground hover:bg-muted transition-all cursor-pointer"
-            >
-              <ShoppingCart className="h-5 w-5" />
-              {totalCartItems > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white">
-                  {totalCartItems}
-                </span>
-              )}
-            </button>
-          </div>
+          <a
+            href="/dashboard"
+            className="text-[10px] font-bold text-slate-500 hover:text-amber-600 transition-colors border border-slate-200 px-2.5 py-1.5 rounded-lg bg-slate-50"
+          >
+            ຈັດການຫຼັງຮ້ານ
+          </a>
+        </div>
+
+        {/* Quick Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="ຄົ້ນຫາອາຫານ ຫຼື ເຄື່ອງດື່ມ..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-slate-100 bg-slate-100/70 pl-9 pr-4 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all font-medium"
+          />
         </div>
       </header>
 
-      {/* ── Banner ── */}
-      <div className="bg-slate-900 text-white py-12 px-4 text-center relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-700 via-slate-900 to-black opacity-60"></div>
-        <div className="relative max-w-3xl mx-auto space-y-4">
-          <span className="inline-flex items-center rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary border border-primary/30">
-            ຍິນດີຕ້ອນຮັບ
-          </span>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            ເລືອກຊື້ສິນຄ້າຄຸນນະພາບດີ
-          </h1>
-          <p className="text-sm text-slate-300 max-w-lg mx-auto">
-            ຄົ້ນຫາ ແລະ ສັ່ງຊື້ສິນຄ້າທີ່ທ່ານຕ້ອງການໄດ້ຢ່າງສະດວກສະບາຍ
-          </p>
+      {/* ── Table Selector Reminder ── */}
+      {!tableNumber && (
+        <div className="bg-amber-50 border-b border-amber-200/50 text-amber-900 py-3 px-4 text-center text-xs font-semibold animate-pulse shrink-0">
+          ⚠️ ທ່ານຍັງບໍ່ໄດ້ລະບຸເລກໂຕະອາຫານ.{" "}
+          <button
+            onClick={() => setIsTableModalOpen(true)}
+            className="text-orange-600 underline font-bold cursor-pointer ml-1"
+          >
+            ຄລິກທີ່ນີ້ເພື່ອເລືອກໂຕະ
+          </button>
         </div>
-      </div>
+      )}
 
-      {/* ── Filter & Main Layout ── */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full grid grid-cols-1 lg:grid-cols-4 gap-8">
-        
-        {/* Sidebar Filters */}
-        <div className="space-y-6">
-          <div className="bg-background border rounded-xl p-5 shadow-sm space-y-4">
-            <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">ຄົ້ນຫາ</h3>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="ປ້ອນຊື່ສິນຄ້າ..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-lg border bg-background pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-          </div>
-
-          <div className="bg-background border rounded-xl p-5 shadow-sm space-y-3">
-            <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">ປະເພດສິນຄ້າ</h3>
-            <div className="flex flex-wrap gap-2 lg:flex-col lg:gap-1.5">
-              <button
-                onClick={() => setSelectedCategory("All")}
-                className={`text-left text-sm px-3 py-2 rounded-lg transition-all cursor-pointer ${
-                  selectedCategory === "All"
-                    ? "bg-primary text-primary-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-              >
-                ທັງໝົດ
-              </button>
-              {CATEGORIES.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`text-left text-sm px-3 py-2 rounded-lg transition-all cursor-pointer ${
-                    selectedCategory === cat
-                      ? "bg-primary text-primary-foreground font-semibold"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
+      {/* ── Active Table Orders Status Tracker ── */}
+      {tableNumber && activeTableOrders.length > 0 && (
+        <div className="bg-orange-50/80 border-b border-orange-100 px-4 py-2 shrink-0">
+          <div className="flex items-center justify-between text-xs text-orange-950 font-semibold">
+            <span className="flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5 text-orange-600 animate-spin shrink-0" />
+              ອໍເດີ້ກຳລັງດຳເນີນການ:
+            </span>
+            <div className="flex gap-1.5 overflow-x-auto max-w-[60%] py-0.5 no-scrollbar">
+              {activeTableOrders.map((order) => (
+                <span
+                  key={order.id}
+                  className="bg-white border border-orange-200/50 rounded-full px-2 py-0.5 text-[9px] shrink-0 font-bold"
                 >
-                  {CAT_LAO[cat] || cat}
-                </button>
+                  #{order.id}: {statusLaoMap[order.status]}
+                </span>
               ))}
             </div>
           </div>
         </div>
+      )}
 
-        {/* Products Grid */}
-        <div className="lg:col-span-3">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-32 gap-3">
-              <div className="h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary" />
-              <p className="text-sm text-muted-foreground">ກໍາລັງໂຫລດຂໍ້ມູນ...</p>
-            </div>
-          ) : products.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-32 text-muted-foreground bg-background rounded-xl border border-dashed">
-              <Package className="h-12 w-12 opacity-30 mb-2" />
-              <p className="text-sm font-medium">ບໍ່ມີສິນຄ້າວາງສະແດງໃນເວລານີ້</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-              {products.map((product) => {
-                const isOut = product.stock === 0;
-                return (
-                  <div
-                    key={product.id}
-                    className="group bg-background border rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex flex-col"
-                  >
-                    {/* Placeholder Product Image */}
-                    <div className="aspect-video w-full bg-slate-100 flex items-center justify-center relative border-b text-slate-400 group-hover:bg-slate-200 transition-colors">
-                      <Package className="h-10 w-10 opacity-40" />
-                      <span className="absolute bottom-2 left-2 text-[10px] bg-background/80 border px-2 py-0.5 rounded-full backdrop-blur-sm">
-                        {CAT_LAO[product.category] || product.category}
-                      </span>
+      {/* ── Categories Bar (Horizontal Scroll) ── */}
+      <div className="bg-white py-3.5 px-4 shadow-sm border-b border-slate-100 sticky top-[105px] z-30 shrink-0">
+        <div className="flex gap-2.5 overflow-x-auto no-scrollbar py-0.5 flex-nowrap touch-pan-x">
+          <button
+            onClick={() => setSelectedCategory("All")}
+            className={`px-4 py-2 rounded-full text-xs font-extrabold transition-all shrink-0 cursor-pointer ${
+              selectedCategory === "All"
+                ? "bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-orange-500/20 scale-105"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            🍽️ ທັງໝົດ
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id.toString())}
+              className={`px-4 py-2 rounded-full text-xs font-extrabold transition-all shrink-0 cursor-pointer flex items-center gap-1 ${
+                selectedCategory === cat.id.toString()
+                  ? "bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-orange-500/20 scale-105"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              <span>{getCategoryEmoji(cat.name, cat.nameLao)}</span>
+              <span>{cat.nameLao}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Food Menu Grid ── */}
+      <main className="max-w-7xl mx-auto px-4 py-5 flex-1 w-full">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
+            <p className="text-xs text-muted-foreground font-semibold">ກຳລັງໂຫລດເມນູອາຫານ...</p>
+          </div>
+        ) : products.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400 bg-white rounded-2xl border border-slate-100 shadow-sm">
+            <Utensils className="h-10 w-10 opacity-30 mb-2" />
+            <p className="text-xs font-bold">ບໍ່ພົບເມນູອາຫານໃນເວລານີ້</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {products.map((product) => {
+              const isOut = !product.status;
+              const qtyInCart = getCartItemQty(product.id);
+              return (
+                <div
+                  key={product.id}
+                  className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm flex flex-col justify-between"
+                >
+                  {/* Photo area */}
+                  <div className="aspect-square w-full bg-slate-50 flex items-center justify-center relative overflow-hidden text-slate-400 select-none">
+                    {product.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={product.image}
+                        alt={product.name}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <Utensils className="h-10 w-10 opacity-20" />
+                    )}
+                    
+                    {/* Category tag */}
+                    <span className="absolute top-2 left-2 text-[9px] font-bold bg-white/95 px-2 py-0.5 rounded-full shadow-sm text-slate-700 backdrop-blur-sm">
+                      {product.category?.nameLao}
+                    </span>
+
+                    {/* Out of Stock overlay */}
+                    {isOut && (
+                      <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
+                        <span className="text-white text-xs font-extrabold bg-red-600/90 px-3 py-1 rounded-full shadow-md">
+                          ໝົດຊົ່ວຄາວ
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Body Info */}
+                  <div className="p-3 flex-1 flex flex-col justify-between gap-2.5">
+                    <div className="space-y-1">
+                      <h3 className="font-extrabold text-xs text-slate-900 line-clamp-1 leading-snug">
+                        {product.name}
+                      </h3>
+                      <p className="text-[10px] text-muted-foreground line-clamp-1">
+                        {product.description || "ອາຫານແຊບໆ ປຸງແຕ່ງສົດໃໝ່"}
+                      </p>
                     </div>
 
-                    <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-                      <div>
-                        <h4 className="font-semibold text-slate-800 line-clamp-1 group-hover:text-primary transition-colors">
-                          {product.name}
-                        </h4>
-                        <p className="text-xs text-muted-foreground line-clamp-2 mt-1 min-h-[2rem]">
-                          {product.description || "ບໍ່ມີລາຍລະອຽດເພີ່ມເຕີມ."}
-                        </p>
-                      </div>
+                    {/* Price and Add Control */}
+                    <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-slate-50">
+                      <span className="text-[11px] font-extrabold text-orange-600">
+                        {formatLAK(product.price)}
+                      </span>
 
-                      <div className="pt-2 border-t flex flex-col gap-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-base font-bold text-slate-900">
-                            {formatLAK(product.price)}
-                          </span>
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                            isOut
-                              ? "bg-red-100 text-red-700"
-                              : product.stock <= 5
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-green-100 text-green-700"
-                          }`}>
-                            {isOut ? "ໝົດແລ້ວ" : `ຍັງເຫຼືອ ${product.stock}`}
-                          </span>
+                      {/* Quantity buttons directly on Card */}
+                      {isOut ? (
+                        <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                          <Plus className="h-3.5 w-3.5" />
                         </div>
-
-                        <div className="flex items-center gap-2">
+                      ) : qtyInCart > 0 ? (
+                        <div className="flex items-center gap-2 border border-orange-200 bg-orange-50/50 rounded-full px-1.5 py-0.5">
                           <button
-                            onClick={() => setSelectedProduct(product)}
-                            className="flex-1 rounded-lg border py-2 text-xs font-semibold hover:bg-muted transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            onClick={() => handleMinusOne(product.id)}
+                            className="h-5 w-5 rounded-full bg-white flex items-center justify-center text-orange-600 hover:bg-orange-100 active:scale-95 transition-all shadow-sm border border-orange-100 cursor-pointer"
                           >
-                            <Eye className="h-3.5 w-3.5" /> ລາຍລະອຽດ
+                            <Minus className="h-3 w-3" />
                           </button>
+                          <span className="text-xs font-mono font-extrabold text-orange-600 min-w-[12px] text-center">
+                            {qtyInCart}
+                          </span>
                           <button
-                            onClick={() => addToCart(product)}
-                            disabled={isOut}
-                            className={`flex-1 rounded-lg py-2 text-xs font-bold text-white transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
-                              isOut
-                                ? "bg-muted text-muted-foreground cursor-not-allowed"
-                                : "bg-primary hover:bg-primary/95"
-                            }`}
+                            onClick={() => handleAddOne(product)}
+                            className="h-5 w-5 rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-white hover:opacity-95 active:scale-95 transition-all shadow-sm cursor-pointer"
                           >
-                            <ShoppingCart className="h-3.5 w-3.5" /> ໃສ່ກະຕ່າ
+                            <Plus className="h-3 w-3" />
                           </button>
                         </div>
-                      </div>
+                      ) : (
+                        <button
+                          onClick={() => handleAddOne(product)}
+                          disabled={!tableNumber}
+                          className="h-7 w-7 rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-md shadow-orange-500/10 active:scale-95 hover:opacity-95 transition-all disabled:from-slate-200 disabled:to-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </main>
 
-      {/* ── Slide-over Cart Panel ── */}
+      {/* ── Sticky Bottom Cart Summary Bar ── */}
+      {totalCartItems > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-gradient-to-tr from-amber-500 to-orange-600 text-white py-3.5 px-5 flex items-center justify-between shadow-2xl rounded-t-2xl backdrop-blur-md animate-in slide-in-from-bottom duration-300">
+          <div className="flex items-center gap-3">
+            <div className="relative h-10 w-10 rounded-full bg-white/20 flex items-center justify-center border border-white/20 shadow-inner">
+              <ShoppingCart className="h-5 w-5" />
+              <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-600 text-[10px] font-bold text-white flex items-center justify-center shadow-md">
+                {totalCartItems}
+              </span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] text-white/80 font-bold">ຍອດລວມທັງໝົດ</span>
+              <span className="text-base font-extrabold tracking-wide">{formatLAK(totalCartPrice)}</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setIsCartOpen(true)}
+            className="flex items-center gap-1.5 bg-white text-orange-600 px-4.5 py-2.5 rounded-xl text-xs font-extrabold shadow-lg hover:bg-orange-50 active:scale-95 transition-all cursor-pointer"
+          >
+            ເບິ່ງກະຕ່າ <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* ── Slide-up Cart Drawer (Mobile style) ── */}
       {isCartOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex justify-end">
-          <div className="w-full max-w-md bg-background h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-250">
-            <div className="flex items-center justify-between border-b p-5">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-end animate-in fade-in duration-200">
+          {/* Backdrop Closer */}
+          <div className="absolute inset-0" onClick={() => setIsCartOpen(false)} />
+          
+          {/* Drawer Sheet */}
+          <div className="relative w-full max-h-[85vh] bg-white rounded-t-3xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300">
+            {/* Drag Handle Indicator */}
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto my-3 shrink-0" />
+            
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pb-3 border-b border-slate-100 shrink-0">
               <div className="flex items-center gap-2">
-                <ShoppingCart className="h-5 w-5 text-primary" />
-                <h3 className="font-bold text-lg">ກະຕ່າສິນຄ້າ</h3>
+                <ShoppingCart className="h-5 w-5 text-orange-500" />
+                <h3 className="font-extrabold text-base">ລາຍການອາຫານທີ່ເລືອກ</h3>
               </div>
               <button
                 onClick={() => setIsCartOpen(false)}
-                className="text-muted-foreground hover:text-foreground cursor-pointer"
+                className="h-8 w-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center cursor-pointer transition-colors"
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {cart.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-                  <ShoppingCart className="h-10 w-10 opacity-30 mb-2" />
-                  <p className="text-sm font-medium">ກະຕ່າສິນຄ້າວ່າງເປົ່າ</p>
-                </div>
-              ) : (
-                cart.map((item) => (
-                  <div key={item.product.id} className="flex gap-4 border-b pb-4">
-                    <div className="h-16 w-16 bg-muted rounded-lg flex items-center justify-center shrink-0">
-                      <Package className="h-6 w-6 text-muted-foreground" />
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <h4 className="font-semibold text-sm text-slate-800 line-clamp-1">{item.product.name}</h4>
-                      <p className="text-xs text-primary font-bold">{formatLAK(item.product.price)}</p>
-                      
-                      <div className="flex items-center gap-3 mt-2">
-                        <div className="flex items-center border rounded-md">
-                          <button
-                            onClick={() => updateCartQty(item.product.id, item.quantity - 1)}
-                            className="px-2 py-0.5 hover:bg-muted text-xs cursor-pointer"
-                          >
-                            -
-                          </button>
-                          <span className="px-3 text-xs font-mono">{item.quantity}</span>
-                          <button
-                            onClick={() => updateCartQty(item.product.id, item.quantity + 1)}
-                            disabled={item.quantity >= item.product.stock}
-                            className="px-2 py-0.5 hover:bg-muted text-xs disabled:opacity-40 cursor-pointer"
-                          >
-                            +
-                          </button>
-                        </div>
+            {/* List */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              {cart.map((item) => (
+                <div key={item.product.id} className="flex gap-4 border-b border-slate-50 pb-4 items-center">
+                  <div className="h-14 w-14 bg-slate-50 rounded-xl flex items-center justify-center shrink-0 overflow-hidden border">
+                    {item.product.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.product.image} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <Utensils className="h-5 w-5 text-slate-300" />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 space-y-1">
+                    <h4 className="font-extrabold text-sm text-slate-800 line-clamp-1">{item.product.name}</h4>
+                    <p className="text-xs text-orange-600 font-extrabold">{formatLAK(item.product.price)}</p>
+                    
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center border border-slate-200 rounded-full bg-slate-50 px-1 py-0.5">
                         <button
-                          onClick={() => updateCartQty(item.product.id, 0)}
-                          className="text-xs text-red-500 hover:underline cursor-pointer"
+                          onClick={() => handleMinusOne(item.product.id)}
+                          className="h-6 w-6 rounded-full bg-white flex items-center justify-center text-slate-600 border shadow-sm cursor-pointer"
                         >
-                          ລຶບ
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <span className="px-3 text-xs font-mono font-extrabold text-slate-800 min-w-[20px] text-center">
+                          {item.quantity}
+                        </span>
+                        <button
+                          onClick={() => handleAddOne(item.product)}
+                          className="h-6 w-6 rounded-full bg-white flex items-center justify-center text-slate-600 border shadow-sm cursor-pointer"
+                        >
+                          <Plus className="h-3 w-3" />
                         </button>
                       </div>
+                      
+                      <button
+                        onClick={() => updateCartQty(item.product.id, 0)}
+                        className="text-slate-400 hover:text-red-500 p-1.5 transition-colors cursor-pointer"
+                        title="ລຶບອອກ"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
-                ))
-              )}
+                </div>
+              ))}
             </div>
 
-            <div className="border-t p-5 space-y-4">
-              <div className="flex justify-between items-center text-sm">
-                <span className="font-medium text-slate-600">ຍອດລວມທັງໝົດ:</span>
-                <span className="text-lg font-bold text-slate-900">{formatLAK(totalCartPrice)}</span>
+            {/* Submit Action */}
+            <div className="border-t border-slate-100 p-5 space-y-4 bg-slate-50/50 shrink-0">
+              <div className="flex justify-between items-center text-sm font-semibold">
+                <span className="text-slate-600">ຍອດລວມທັງໝົດ:</span>
+                <span className="text-lg font-extrabold text-slate-900">{formatLAK(totalCartPrice)}</span>
               </div>
               <button
-                onClick={() => alert("ລະບົບການຊໍາລະເງິນແມ່ນ UI ກໍາລັງພັດທະນາ")}
-                disabled={cart.length === 0}
-                className="w-full rounded-xl bg-primary py-3 text-sm font-bold text-white hover:bg-primary/95 transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
+                onClick={handlePlaceOrder}
+                disabled={cart.length === 0 || ordering || !tableNumber}
+                className="w-full rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 py-3.5 text-sm font-extrabold text-white hover:opacity-95 active:scale-[0.99] transition-all disabled:from-slate-200 disabled:to-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 shadow-lg"
               >
-                ດໍາເນີນການສັ່ງຊື້ <ArrowRight className="h-4 w-4" />
+                {ordering ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    ກຳລັງສົ່ງອໍເດີ້...
+                  </>
+                ) : (
+                  <>
+                    ສັ່ງອາຫານໃສ່ ໂຕະ {tableNumber || ""}
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Product Detail Modal ── */}
-      {selectedProduct && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center">
-          <div className="bg-background border rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh]">
-            <div className="flex items-center justify-between border-b p-5">
-              <h2 className="text-lg font-bold">ລາຍລະອຽດສິນຄ້າ</h2>
-              <button
-                onClick={() => setSelectedProduct(null)}
-                className="text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            <div className="p-6 overflow-y-auto space-y-4 flex-1">
-              <div className="aspect-video w-full bg-slate-100 rounded-xl flex items-center justify-center text-slate-400">
-                <Package className="h-16 w-16 opacity-40" />
-              </div>
-              <div>
-                <span className="inline-flex items-center rounded-full bg-muted border px-2.5 py-0.5 text-xs font-medium text-slate-600">
-                  {CAT_LAO[selectedProduct.category] || selectedProduct.category}
-                </span>
-                <h3 className="text-xl font-bold mt-2">{selectedProduct.name}</h3>
-                <p className="text-2xl font-extrabold text-slate-900 mt-1">
-                  {formatLAK(selectedProduct.price)}
-                </p>
-              </div>
-
-              <div className="bg-slate-50 rounded-lg p-4 border space-y-2">
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">ລາຍລະອຽດ</h4>
-                <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed">
-                  {selectedProduct.description || "ບໍ່ມີລາຍລະອຽດເພີ່ມເຕີມສໍາລັບສິນຄ້ານີ້."}
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between text-sm py-2">
-                <span className="text-slate-600">ສະຖານະສາງ:</span>
-                <span className={`font-semibold ${selectedProduct.stock > 0 ? "text-green-600" : "text-red-500"}`}>
-                  {selectedProduct.stock > 0 ? `ພ້ອມສົ່ງ (ຍັງເຫຼືອ ${selectedProduct.stock})` : "ໝົດຊົ່ວຄາວ"}
-                </span>
-              </div>
+      {/* ── Table Selection Modal ── */}
+      {isTableModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-sm shadow-2xl flex flex-col max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom sm:zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b p-4 shrink-0 bg-slate-50">
+              <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                🍽️ ເລືອກໂຕະອາຫານຂອງທ່ານ
+              </span>
+              {tableNumber && (
+                <button
+                  onClick={() => setIsTableModalOpen(false)}
+                  className="h-7 w-7 rounded-full hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
 
-            <div className="border-t p-5 flex justify-end gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => setSelectedProduct(null)}
-                className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors cursor-pointer"
-              >
-                ປິດ
-              </button>
-              <button
-                onClick={() => {
-                  addToCart(selectedProduct);
-                  setSelectedProduct(null);
-                }}
-                disabled={selectedProduct.stock === 0}
-                className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white hover:bg-primary/95 transition-colors disabled:bg-muted disabled:text-muted-foreground cursor-pointer"
-              >
-                ໃສ່ກະຕ່າ
-              </button>
+            {/* Content */}
+            <div className="p-5 overflow-y-auto space-y-4">
+              <p className="text-xs text-muted-foreground font-semibold">
+                ກະລຸນາເລືອກເລກໂຕະທີ່ທ່ານນັ່ງ ເພື່ອໃຫ້ຄົວເສີບອາຫານໄດ້ຢ່າງຖືກຕ້ອງ:
+              </p>
+
+              {/* Grid of Tables */}
+              <div className="grid grid-cols-4 gap-2.5">
+                {Array.from({ length: 12 }, (_, i) => {
+                  const num = String(i + 1).padStart(2, "0");
+                  const isActive = tableNumber === num;
+                  return (
+                    <button
+                      key={num}
+                      onClick={() => {
+                        setTableNumber(num);
+                        if (typeof window !== "undefined") {
+                          window.history.pushState({}, "", `?table=${num}`);
+                        }
+                        setIsTableModalOpen(false);
+                        showToast(`ເລືອກ ໂຕະ ${num} ສຳເລັດ!`);
+                      }}
+                      className={`py-3.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                        isActive
+                          ? "bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-orange-500/25 scale-105"
+                          : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Custom input if needed */}
+              <div className="border-t pt-4 space-y-2">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  ຫຼື ປ້ອນເລກໂຕະດ້ວຍຕົນເອງ
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="ເຊັ່ນ: 15, VIP-01..."
+                    defaultValue={tableNumber || ""}
+                    id="custom-table-input"
+                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 font-bold text-center"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const val = (e.target as HTMLInputElement).value.trim();
+                        if (val) {
+                          setTableNumber(val);
+                          if (typeof window !== "undefined") {
+                            window.history.pushState({}, "", `?table=${val}`);
+                          }
+                          setIsTableModalOpen(false);
+                          showToast(`ເລືອກ ໂຕະ ${val} ສຳເລັດ!`);
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      const input = document.getElementById("custom-table-input") as HTMLInputElement;
+                      const val = input?.value.trim();
+                      if (val) {
+                        setTableNumber(val);
+                        if (typeof window !== "undefined") {
+                          window.history.pushState({}, "", `?table=${val}`);
+                        }
+                        setIsTableModalOpen(false);
+                        showToast(`ເລືອກ ໂຕະ ${val} ສຳເລັດ!`);
+                      }
+                    }}
+                    className="rounded-xl bg-slate-900 px-4 text-xs font-bold text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    ຕົກລົງ
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+// Simple loader helper icon
+function Loader2({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    </svg>
   );
 }

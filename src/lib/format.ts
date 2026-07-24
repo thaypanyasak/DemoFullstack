@@ -65,3 +65,24 @@ export function formatPriceInput(raw: string): string {
 export function parsePriceInput(formatted: string): number {
   return parseInt(formatted.replace(/\./g, "").replace(/,/g, ""), 10) || 0;
 }
+
+/**
+ * ຟໍແມັດວັນທີ ແລະ ເວລາ ເປັນ DD/MM/YYYY HH:mm (24h)
+ * Format a Date object or ISO string as DD/MM/YYYY HH:mm (24h)
+ *
+ * @example
+ * formatDateTime("2026-07-24T12:50:00Z") // → "24/07/2026 12:50"
+ */
+export function formatDateTime(dateInput: Date | string | number | undefined): string {
+  if (!dateInput) return "";
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return "";
+
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}

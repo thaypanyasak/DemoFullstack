@@ -1,3 +1,5 @@
+import type { Category } from "./category";
+
 // ─── Domain Entity ─────────────────────────────────────────────────────────────
 
 export interface Product {
@@ -5,8 +7,11 @@ export interface Product {
   name: string;
   description: string;
   price: number;
-  stock: number;
-  category: string;
+  stock: number | null; // Database column remains but can be null (unlimited)
+  status: boolean; // false = Inactive (ປິດຂາຍ), true = Active (ເປີດຂາຍ)
+  categoryId: number | null;
+  category?: Category | null;
+  image: string | null; // URL of dish image
   createdAt: string;
   updatedAt: string;
 }
@@ -19,49 +24,29 @@ export interface ProductFormData {
   description: string;
   /** Raw digit string, e.g. "1000000". No formatting. */
   price: string;
-  stock: string;
-  category: string;
+  status: boolean; // Active/Inactive toggle
+  categoryId: string; // HTML select value is always a string representation of ID
+  image: string; // URL of image
 }
 
 // ─── API Payload (price = number) ─────────────────────────────────────────────
 // Used when calling the backend API (POST /api/products, PUT /api/products/:id).
-// getSubmitData() in useProductForm converts FormData → Payload.
 
 export interface ProductPayload {
   name: string;
   description: string;
   /** Parsed number ready for the backend, e.g. 1000000 */
   price: number;
-  stock: string;
-  category: string;
+  status: boolean; // Active/Inactive status
+  categoryId: number | null; // Database category ID
+  image: string; // URL of image
 }
-
-// ─── Constants ─────────────────────────────────────────────────────────────────
-
-export const CATEGORIES = [
-  "Electronics",
-  "Clothing",
-  "Home & Kitchen",
-  "Books",
-  "Sports",
-  "Cosmetics",
-  "Other",
-] as const;
-
-export const CAT_LAO: Record<string, string> = {
-  Electronics: "ເອເລັກໂທຣນິກ",
-  Clothing: "ເຄື່ອງນຸ່ງ",
-  "Home & Kitchen": "ເຄື່ອງເຮືອນ",
-  Books: "ປຶ້ມ",
-  Sports: "ກິລາ",
-  Cosmetics: "ເຄື່ອງສໍາອາງ",
-  Other: "ອື່ນໆ",
-};
 
 export const DEFAULT_FORM_DATA: ProductFormData = {
   name: "",
   description: "",
   price: "",
-  stock: "",
-  category: "Electronics",
+  status: true, // Active by default
+  categoryId: "", // Default to empty (must select one)
+  image: "",
 };

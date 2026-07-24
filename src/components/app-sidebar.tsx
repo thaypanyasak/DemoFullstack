@@ -3,13 +3,14 @@
 import * as React from "react"
 import {
   LayoutDashboard,
-  Package,
-  ShoppingCart,
-  Users,
+  UtensilsCrossed,
+  ClipboardList,
   BarChart3,
   Settings,
   LogOut,
   Store,
+  QrCode,
+  Tags,
 } from "lucide-react"
 
 import { SearchForm } from "@/components/search-form"
@@ -40,32 +41,27 @@ const navMain = [
     ],
   },
   {
-    title: "ຈັດການສາງ",
+    title: "ຈັດການຮ້ານອາຫານ",
     items: [
       {
-        title: "ສິນຄ້າ",
+        title: "ເມນູອາຫານ",
         url: "/dashboard/products",
-        icon: Package,
+        icon: UtensilsCrossed,
       },
       {
-        title: "ຄໍາສັ່ງຊື້",
-        url: "#",
-        icon: ShoppingCart,
+        title: "ຈັດການປະເພດອາຫານ",
+        url: "/dashboard/categories",
+        icon: Tags,
       },
       {
-        title: "ລູກຄ້າ",
-        url: "#",
-        icon: Users,
+        title: "ຈັດການອໍເດີ້",
+        url: "/dashboard/orders",
+        icon: ClipboardList,
       },
-    ],
-  },
-  {
-    title: "ລາຍງານ",
-    items: [
       {
-        title: "ສະຖິຕິ",
-        url: "#",
-        icon: BarChart3,
+        title: "ຈັດການໂຕະ & QR Code",
+        url: "/dashboard/tables",
+        icon: QrCode,
       },
     ],
   },
@@ -81,11 +77,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <Store className="h-4 w-4" />
           </div>
           <div className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold">ສາງສິນຄ້າ Pro</span>
-            <span className="text-xs text-muted-foreground">v1.0.0</span>
+            <span className="text-sm font-semibold">ລະບົບສັ່ງອາຫານ Pro</span>
+            <span className="text-xs text-muted-foreground">v2.0.0</span>
           </div>
         </div>
-        <SearchForm className="mt-1" />
       </SidebarHeader>
 
       {/* Navigation */}

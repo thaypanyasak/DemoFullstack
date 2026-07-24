@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-// Lấy danh sách sản phẩm (có tìm kiếm và lọc)
+// ດຶງຂໍ້ມູນອາຫານທັງໝົດ
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("query") || "";
-    const category = searchParams.get("category") || "";
+    const categoryId = searchParams.get("categoryId") || "";
 
     const products = await db.product.findMany({
       where: {
@@ -19,10 +19,13 @@ export async function GET(request: Request) {
                 ],
               }
             : {},
-          category && category !== "All"
-            ? { category: { equals: category } }
+          categoryId && categoryId !== "All"
+            ? { categoryId: { equals: parseInt(categoryId) } }
             : {},
         ],
+      },
+      include: {
+        category: true,
       },
       orderBy: { createdAt: "desc" },
     });
@@ -31,22 +34,21 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("GET Products Error:", error);
     return NextResponse.json(
-      { error: "Lỗi khi tải danh sách sản phẩm" },
+      { error: "ເກີດຂໍ້ຜິດພາດໃນການໂຫລດລາຍການອາຫານ" },
       { status: 500 }
     );
   }
 }
 
-// Tạo sản phẩm mới
+// ເພີ່ມອາຫານໃໝ່
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, description, price, stock, category } = body;
+    const { name, description, price, categoryId, image, status } = body;
 
-    // Kiểm tra dữ liệu bắt buộc
-    if (!name || price === undefined || stock === undefined || !category) {
+    if (!name || price === undefined) {
       return NextResponse.json(
-        { error: "Vui lòng nhập đầy đủ các thông tin bắt buộc" },
+        { error: "ກະລຸນາປ້ອນຂໍ້ມູນທີ່ຈຳເປັນໃຫ້ຄົບຖ້ວນ" },
         { status: 400 }
       );
     }
@@ -56,8 +58,13 @@ export async function POST(request: Request) {
         name,
         description: description || "",
         price: parseFloat(price),
-        stock: parseInt(stock),
-        category,
+        stock: null, // stock is deprecated/removed in UI
+        status: status !== undefined ? status : true,
+        categoryId: categoryId ? parseInt(categoryId) : null,
+        image: image || null,
+      },
+      include: {
+        category: true,
       },
     });
 
@@ -65,7 +72,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("POST Product Error:", error);
     return NextResponse.json(
-      { error: "Lỗi khi tạo sản phẩm mới" },
+      { error: "ເກີດຂໍ້ຜິດພາດໃນການບັນທຶກອາຫານໃໝ່" },
       { status: 500 }
     );
   }

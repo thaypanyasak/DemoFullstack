@@ -1,15 +1,16 @@
 import { formatLAK } from "@/lib/format";
-import { CAT_LAO } from "@/types/product";
 import type { Product } from "@/types/product";
+import { Utensils } from "lucide-react";
 
 interface Props {
   products: Product[];
   loading: boolean;
   onEdit: (product: Product) => void;
   onDelete: (id: number) => void;
+  onToggleActive: (id: number, currentStatus: boolean) => void;
 }
 
-export function ProductTable({ products, loading, onEdit, onDelete }: Props) {
+export function ProductTable({ products, loading, onEdit, onDelete, onToggleActive }: Props) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -22,15 +23,8 @@ export function ProductTable({ products, loading, onEdit, onDelete }: Props) {
   if (products.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-        <svg className="h-12 w-12 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="1.5"
-            d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0a2 2 0 01-2 2H6a2 2 0 01-2-2m16 0V9a2 2 0 00-2-2H6a2 2 0 00-2 2v4.5"
-          />
-        </svg>
-        <p className="text-sm font-medium">ບໍ່ພົບສິນຄ້າ</p>
+        <Utensils className="h-12 w-12 opacity-30" />
+        <p className="text-sm font-medium">ບໍ່ພົບລາຍການອາຫານໃນເມນູ</p>
       </div>
     );
   }
@@ -41,53 +35,74 @@ export function ProductTable({ products, loading, onEdit, onDelete }: Props) {
         <thead>
           <tr className="border-b bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
             <th className="px-4 py-3 text-left">ID</th>
-            <th className="px-4 py-3 text-left">ສິນຄ້າ</th>
+            <th className="px-4 py-3 text-left">ລາຍການອາຫານ</th>
             <th className="px-4 py-3 text-left">ປະເພດ</th>
             <th className="px-4 py-3 text-right">ລາຄາ</th>
-            <th className="px-4 py-3 text-center">ຈໍານວນ</th>
-            <th className="px-4 py-3 text-center">ສະຖານະ</th>
+            <th className="px-4 py-3 text-center">ເປີດ-ປິດຂາຍ</th>
             <th className="px-4 py-3 text-center">ດໍາເນີນການ</th>
           </tr>
         </thead>
         <tbody className="divide-y">
           {products.map((product) => {
-            const isLow = product.stock <= 5;
-            const isOut = product.stock === 0;
             return (
               <tr key={product.id} className="hover:bg-muted/30 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                   #{product.id}
                 </td>
                 <td className="px-4 py-3">
-                  <div className="font-medium">{product.name}</div>
-                  <div className="text-xs text-muted-foreground line-clamp-1">
-                    {product.description || "—"}
+                  <div className="flex items-center gap-3">
+                    {/* Small Image Preview */}
+                    <div className="h-10 w-10 rounded-lg bg-slate-100 border flex items-center justify-center overflow-hidden shrink-0 text-slate-400">
+                      {product.image ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={product.image}
+                          alt={product.name}
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        <Utensils className="h-4 w-4 opacity-40" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-medium text-slate-800">{product.name}</div>
+                      <div className="text-xs text-muted-foreground line-clamp-1 max-w-[200px]">
+                        {product.description || "—"}
+                      </div>
+                    </div>
                   </div>
                 </td>
                 <td className="px-4 py-3">
                   <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium">
-                    {CAT_LAO[product.category] || product.category}
+                    {product.category?.nameLao || "—"}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right font-semibold">
+                <td className="px-4 py-3 text-right font-semibold text-slate-900">
                   {formatLAK(product.price)}
                 </td>
-                <td className="px-4 py-3 text-center font-mono">{product.stock}</td>
+                
+                {/* Instant toggle active / inactive switch */}
                 <td className="px-4 py-3 text-center">
-                  {isOut ? (
-                    <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
-                      ໝົດສາງ
-                    </span>
-                  ) : isLow ? (
-                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                      ໃກ້ໝົດ
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">
-                      ມີສິນຄ້າ
-                    </span>
-                  )}
+                  <div className="flex items-center justify-center">
+                    <button
+                      onClick={() => onToggleActive(product.id, product.status)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
+                        product.status ? "bg-green-500" : "bg-slate-200"
+                      }`}
+                      title={product.status ? "ປິດຂາຍເມນູນີ້" : "ເປີດຂາຍເມນູນີ້"}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          product.status ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </td>
+
                 <td className="px-4 py-3 text-center">
                   <div className="flex items-center justify-center gap-2">
                     <button

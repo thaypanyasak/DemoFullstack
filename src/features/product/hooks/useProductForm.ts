@@ -20,8 +20,19 @@ export function useProductForm() {
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const { name, value, type } = e.target;
+    
+    if (type === "checkbox") {
+      const checked = (e.target as HTMLInputElement).checked;
+      setFormData((prev) => ({ ...prev, [name]: checked }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
+  };
+
+  /** Direct setter for boolean fields (like toggle buttons) */
+  const setStatus = (status: boolean) => {
+    setFormData((prev) => ({ ...prev, status }));
   };
 
   /**
@@ -49,8 +60,9 @@ export function useProductForm() {
       name: product.name,
       description: product.description,
       price: rawDigits,
-      stock: String(product.stock),
-      category: product.category,
+      status: product.status,
+      categoryId: product.categoryId ? String(product.categoryId) : "",
+      image: product.image || "",
     });
     setPriceDisplay(formatPriceInput(rawDigits));
   };
@@ -63,9 +75,14 @@ export function useProductForm() {
     name: formData.name,
     description: formData.description,
     price: parsePriceInput(priceDisplay) || Number(formData.price) || 0,
-    stock: formData.stock,
-    category: formData.category,
+    status: formData.status,
+    categoryId: formData.categoryId ? parseInt(formData.categoryId) : null,
+    image: formData.image,
   });
+
+  const setImageUrl = (url: string) => {
+    setFormData((prev) => ({ ...prev, image: url }));
+  };
 
   return {
     formData,
@@ -74,6 +91,8 @@ export function useProductForm() {
     handlePriceChange,
     reset,
     setProduct,
+    setImageUrl,
+    setStatus,
     getSubmitData,
   };
 }

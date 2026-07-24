@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink,
@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 import { createProduct, deleteProduct, updateProduct } from "../api/products.api";
+import { fetchCategories } from "@/features/category/api/categories.api";
 import { useProductForm } from "../hooks/useProductForm";
 import { useProducts } from "../hooks/useProducts";
 import { useToast } from "../hooks/useToast";
@@ -19,10 +20,13 @@ import { ProductModal } from "./ProductModal";
 import { ProductStats } from "./ProductStats";
 import { ProductTable } from "./ProductTable";
 import type { Product } from "@/types/product";
+import type { Category } from "@/types/category";
 
 export function ProductsPage() {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [categories, setCategories] = useState<Category[]>([]);
+  
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -31,6 +35,13 @@ export function ProductsPage() {
   const { products, loading, refetch } = useProducts(search, selectedCategory);
   const form = useProductForm();
   const { toast, showToast } = useToast();
+
+  // Fetch categories on mount
+  useEffect(() => {
+    fetchCategories()
+      .then(setCategories)
+      .catch((err) => showToast(err.message || "ເກີດຂໍ້ຜິດພາດໃນການໂຫຼດປະເພດອາຫານ", "error"));
+  }, []);
 
   // ── Add ──────────────────────────────────────────────────────────────────────
   const handleOpenAdd = () => {
@@ -42,7 +53,7 @@ export function ProductsPage() {
     e.preventDefault();
     try {
       await createProduct(form.getSubmitData());
-      showToast("ເພີ່ມສິນຄ້າສໍາເລັດ!");
+      showToast("ເພີ່ມລາຍການອາຫານສໍາເລັດ!");
       setIsAddOpen(false);
       form.reset();
       refetch();
@@ -63,7 +74,7 @@ export function ProductsPage() {
     if (!currentId) return;
     try {
       await updateProduct(currentId, form.getSubmitData());
-      showToast("ອັບເດດສິນຄ້າສໍາເລັດ!");
+      showToast("ອັບເດດລາຍການອາຫານສໍາເລັດ!");
       setIsEditOpen(false);
       form.reset();
       refetch();
@@ -82,9 +93,20 @@ export function ProductsPage() {
     if (!currentId) return;
     try {
       await deleteProduct(currentId);
-      showToast("ລຶບສິນຄ້າສໍາເລັດ!");
+      showToast("ລຶບລາຍການອາຫານສໍາເລັດ!");
       setIsDeleteOpen(false);
       setCurrentId(null);
+      refetch();
+    } catch (err: any) {
+      showToast(err.message, "error");
+    }
+  };
+
+  // ── Toggle Active Status ─────────────────────────────────────────────────────
+  const handleToggleActive = async (id: number, currentStatus: boolean) => {
+    try {
+      await updateProduct(id, { status: !currentStatus } as any);
+      showToast("ອັບເດດສະຖານະອາຫານສໍາເລັດ!");
       refetch();
     } catch (err: any) {
       showToast(err.message, "error");
@@ -106,7 +128,7 @@ export function ProductsPage() {
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
               <BreadcrumbItem>
-                <BreadcrumbPage>ສິນຄ້າ</BreadcrumbPage>
+                <BreadcrumbPage>ເມນູອາຫານ</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
@@ -118,7 +140,7 @@ export function ProductsPage() {
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
               </svg>
-              ເພີ່ມສິນຄ້າ
+              ເພີ່ມເມນູອາຫານ
             </button>
           </div>
         </header>
@@ -139,8 +161,8 @@ export function ProductsPage() {
         {/* ── Content ── */}
         <div className="flex flex-1 flex-col gap-6 p-6">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">ຈັດການສິນຄ້າ</h1>
-            <p className="text-sm text-muted-foreground mt-1">ເພີ່ມ, ແກ້ໄຂ, ຫລຶ ລຶບສິນຄ້າໃນສາງ</p>
+            <h1 className="text-2xl font-bold tracking-tight">ຈັດການເມນູອາຫານ</h1>
+            <p className="text-sm text-muted-foreground mt-1">ເພີ່ມ, ແກ້ໄຂ, ຫຼື ລຶບລາຍການອາຫານໃນເມນູ</p>
           </div>
 
           <ProductStats products={products} />
@@ -149,6 +171,7 @@ export function ProductsPage() {
             selectedCategory={selectedCategory}
             onSearchChange={setSearch}
             onCategoryChange={setSelectedCategory}
+            categories={categories}
           />
 
           <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
@@ -157,6 +180,7 @@ export function ProductsPage() {
               loading={loading}
               onEdit={handleOpenEdit}
               onDelete={handleOpenDelete}
+              onToggleActive={handleToggleActive}
             />
           </div>
         </div>
@@ -168,6 +192,7 @@ export function ProductsPage() {
           onClose={() => setIsAddOpen(false)}
           onSubmit={handleAdd}
           form={form}
+          categories={categories}
         />
         <ProductModal
           mode="edit"
@@ -175,6 +200,7 @@ export function ProductsPage() {
           onClose={() => setIsEditOpen(false)}
           onSubmit={handleEdit}
           form={form}
+          categories={categories}
         />
         <DeleteConfirmModal
           isOpen={isDeleteOpen}

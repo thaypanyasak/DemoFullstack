@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   Breadcrumb,
@@ -12,76 +15,120 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import {
-  Package,
-  ShoppingCart,
-  Users,
+  UtensilsCrossed,
+  ClipboardCheck,
+  Store,
   TrendingUp,
   ArrowUpRight,
-  ArrowDownRight,
   MoreHorizontal,
 } from "lucide-react";
-import { formatLAK, formatLAKShort } from "@/lib/format";
+import { formatLAK } from "@/lib/format";
+import { ORDER_STATUS_COLORS, ORDER_STATUS_LAO, OrderStatus } from "@/types/order";
 
-const stats = [
-  {
-    title: "ລາຍໄດ້ທັງໝົດ",
-    value: formatLAKShort(926_250_000),
-    change: "+20.1%",
-    up: true,
-    desc: "ທຽບກັບເດືອນກ່ອນ",
-    icon: TrendingUp,
-    color: "text-emerald-600",
-    bg: "bg-emerald-50",
-  },
-  {
-    title: "ສິນຄ້າ",
-    value: "128",
-    change: "+12",
-    up: true,
-    desc: "ເພີ່ມໃໝ່ເດືອນນີ້",
-    icon: Package,
-    color: "text-blue-600",
-    bg: "bg-blue-50",
-  },
-  {
-    title: "ຄໍາສັ່ງຊື້",
-    value: "573",
-    change: "+8.2%",
-    up: true,
-    desc: "ທຽບກັບເດືອນກ່ອນ",
-    icon: ShoppingCart,
-    color: "text-violet-600",
-    bg: "bg-violet-50",
-  },
-  {
-    title: "ລູກຄ້າ",
-    value: "2,350",
-    change: "-3.1%",
-    up: false,
-    desc: "ທຽບກັບເດືອນກ່ອນ",
-    icon: Users,
-    color: "text-orange-600",
-    bg: "bg-orange-50",
-  },
-];
-
-const recentOrders = [
-  { id: "#ORD-001", customer: "ສົມຈິດ ວົງໄຊ", product: "iPhone 15 Pro", amount: formatLAK(20_479_500), status: "ສໍາເລັດ", statusColor: "bg-green-100 text-green-700" },
-  { id: "#ORD-002", customer: "ນາງ ບຸນມີ", product: "Samsung Galaxy S24", amount: formatLAK(16_359_500), status: "ກໍາລັງສົ່ງ", statusColor: "bg-blue-100 text-blue-700" },
-  { id: "#ORD-003", customer: "ທ້າວ ພັນດີ", product: "Nike Air Max 270", amount: formatLAK(3_072_000), status: "ລໍຖ້າ", statusColor: "bg-amber-100 text-amber-700" },
-  { id: "#ORD-004", customer: "ນາງ ດາລາ", product: "Sony WH-1000XM5", amount: formatLAK(7_147_500), status: "ສໍາເລັດ", statusColor: "bg-green-100 text-green-700" },
-  { id: "#ORD-005", customer: "ທ້າວ ສີທອນ", product: "MacBook Air M3", amount: formatLAK(26_620_000), status: "ຍົກເລີກ", statusColor: "bg-red-100 text-red-700" },
-];
-
-const topProducts = [
-  { name: "iPhone 15 Pro", sold: 128, revenue: formatLAKShort(2_621_376_000), progress: 90 },
-  { name: "Samsung Galaxy S24", sold: 94, revenue: formatLAKShort(1_537_771_000), progress: 66 },
-  { name: "MacBook Air M3", sold: 61, revenue: formatLAKShort(1_623_399_000), progress: 43 },
-  { name: "Sony WH-1000XM5", sold: 49, revenue: formatLAKShort(350_571_500), progress: 35 },
-  { name: "Nike Air Max 270", sold: 38, revenue: formatLAKShort(116_736_000), progress: 27 },
-];
+interface DashboardStats {
+  todayRevenue: number;
+  todayOrders: number;
+  totalProducts: number;
+  activeTablesCount: number;
+  recentOrders: {
+    id: string;
+    table: string;
+    items: string;
+    amount: number;
+    status: string;
+    createdAt: string;
+  }[];
+  topDishes: {
+    name: string;
+    sold: number;
+    revenue: number;
+    progress: number;
+  }[];
+}
 
 export function DashboardOverview() {
+  const [data, setData] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchStats = async () => {
+    try {
+      const res = await fetch("/api/dashboard/stats");
+      if (!res.ok) throw new Error("Failed to load dashboard statistics");
+      const json = await res.json();
+      setData(json);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to load dashboard statistics");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+    // Auto-refresh stats every 10 seconds
+    const interval = setInterval(fetchStats, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (loading && !data) {
+    return (
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <div className="flex h-screen items-center justify-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary" />
+            <p className="text-sm text-muted-foreground">ກຳລັງໂຫລດຂໍ້ມູນສະຖິຕິ...</p>
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    );
+  }
+
+  const stats = [
+    {
+      title: "ລາຍໄດ້ມື້ນີ້",
+      value: formatLAK(data?.todayRevenue || 0),
+      change: "ອັບເດດສົດ",
+      up: true,
+      desc: "ຈາກອໍເດີ້ທີ່ຊຳລະແລ້ວ",
+      icon: TrendingUp,
+      color: "text-emerald-600",
+      bg: "bg-emerald-50",
+    },
+    {
+      title: "ລາຍການອາຫານໃນເມນູ",
+      value: `${data?.totalProducts || 0} ລາຍການ`,
+      change: "ຄົງທີ່",
+      up: true,
+      desc: "ພ້ອມໃຫ້ບໍລິການລູກຄ້າ",
+      icon: UtensilsCrossed,
+      color: "text-blue-600",
+      bg: "bg-blue-50",
+    },
+    {
+      title: "ອໍເດີ້ມື້ນີ້",
+      value: `${data?.todayOrders || 0} ອໍເດີ້`,
+      change: "ອັບເດດສົດ",
+      up: true,
+      desc: "ທັງໝົດທີ່ສັ່ງໃນມື້ນີ້",
+      icon: ClipboardCheck,
+      color: "text-violet-600",
+      bg: "bg-violet-50",
+    },
+    {
+      title: "ໂຕະອາຫານທີ່ກຳລັງນັ່ງ",
+      value: `${data?.activeTablesCount || 0} ໂຕະ`,
+      change: "ກຳລັງກິນ",
+      up: true,
+      desc: "ມີອໍເດີ້ທີ່ຍັງບໍ່ທັນປິດບິນ",
+      icon: Store,
+      color: "text-orange-600",
+      bg: "bg-orange-50",
+    },
+  ];
+
   return (
     <SidebarProvider>
       <AppSidebar />
@@ -100,10 +147,24 @@ export function DashboardOverview() {
         </header>
 
         <div className="flex flex-1 flex-col gap-6 p-6">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">ພາບລວມລະບົບ</h1>
-            <p className="text-sm text-muted-foreground mt-1">ຍິນດີຕ້ອນຮັບກັບລະບົບຄຸ້ມຄອງສາງສິນຄ້າ</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">ພາບລວມລະບົບຮ້ານອາຫານ</h1>
+              <p className="text-sm text-muted-foreground mt-1">ຍິນດີຕ້ອນຮັບກັບລະບົບສັ່ງອາຫານ ແລະ ຈັດການຮ້ານອາຫານ Pro</p>
+            </div>
+            <button
+              onClick={() => fetchStats()}
+              className="rounded-lg border px-3 py-1.5 text-xs font-semibold hover:bg-muted transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              ♻️ ໂຫຼດຄືນໃໝ່
+            </button>
           </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl text-sm">
+              ⚠️ {error}
+            </div>
+          )}
 
           {/* Stats Grid */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -116,14 +177,9 @@ export function DashboardOverview() {
                   </div>
                 </div>
                 <div className="mt-3">
-                  <p className="text-2xl font-extrabold">{stat.value}</p>
+                  <p className="text-2xl font-extrabold text-slate-800">{stat.value}</p>
                   <div className="mt-1 flex items-center gap-1 text-xs">
-                    {stat.up ? (
-                      <ArrowUpRight className="h-3.5 w-3.5 text-emerald-600" />
-                    ) : (
-                      <ArrowDownRight className="h-3.5 w-3.5 text-red-500" />
-                    )}
-                    <span className={stat.up ? "text-emerald-600 font-semibold" : "text-red-500 font-semibold"}>
+                    <span className="text-emerald-600 font-semibold">
                       {stat.change}
                     </span>
                     <span className="text-muted-foreground">{stat.desc}</span>
@@ -139,22 +195,23 @@ export function DashboardOverview() {
             <div className="lg:col-span-2 rounded-xl border bg-card p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="font-semibold">ລາຍໄດ້ 6 ເດືອນຜ່ານມາ</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">ລາຍໄດ້ລວມ ແລະ ຄ່າໃຊ້ຈ່າຍ</p>
+                  <h3 className="font-semibold text-slate-800">ຍອດຂາຍປະຈຳອາທິດ</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">ຍອດຂາຍລວມ ແລະ ຄ່າວັດຖຸດິບ</p>
                 </div>
                 <button className="rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors">
-                  ເດືອນນີ້
+                ອາທິດນີ້
                 </button>
               </div>
               {/* Fake Bar Chart */}
               <div className="flex items-end gap-2 h-40 px-2">
                 {[
-                  { month: "ມ.ກ", revenue: 65, cost: 40 },
-                  { month: "ກ.ພ", revenue: 78, cost: 52 },
-                  { month: "ມີ.ນ", revenue: 55, cost: 35 },
-                  { month: "ເມ.ສ", revenue: 90, cost: 60 },
-                  { month: "ພ.ພ", revenue: 72, cost: 45 },
-                  { month: "ມິ.ຖ", revenue: 95, cost: 58 },
+                  { month: "ຈັນ", revenue: 65, cost: 40 },
+                  { month: "ອັງຄານ", revenue: 78, cost: 52 },
+                  { month: "ພຸດ", revenue: 55, cost: 35 },
+                  { month: "ພະຫັດ", revenue: 90, cost: 60 },
+                  { month: "ສຸກ", revenue: 72, cost: 45 },
+                  { month: "ເສົາ", revenue: 98, cost: 58 },
+                  { month: "ອາທິດ", revenue: 110, cost: 65 },
                 ].map((d) => (
                   <div key={d.month} className="flex flex-1 flex-col items-center gap-1">
                     <div className="flex w-full items-end gap-0.5 justify-center" style={{ height: "120px" }}>
@@ -166,34 +223,42 @@ export function DashboardOverview() {
                 ))}
               </div>
               <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
-                <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-primary/80" />ລາຍໄດ້</div>
-                <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-muted" />ຄ່າໃຊ້ຈ່າຍ</div>
+                <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-primary/80" />ຍອດຂາຍອາຫານ</div>
+                <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-muted" />ຄ່າວັດຖຸດິບ</div>
               </div>
             </div>
 
             {/* Top Products */}
             <div className="rounded-xl border bg-card p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold">ສິນຄ້າຂາຍດີ</h3>
+                <h3 className="font-semibold text-slate-800">ເມນູອາຫານຂາຍດີ</h3>
                 <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
               </div>
               <div className="space-y-4">
-                {topProducts.map((product, index) => (
-                  <div key={product.name}>
-                    <div className="flex items-center justify-between text-sm mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
-                          {index + 1}
-                        </span>
-                        <span className="font-medium truncate max-w-[120px]">{product.name}</span>
-                      </div>
-                      <span className="text-xs text-muted-foreground">{product.sold} ອັນ</span>
-                    </div>
-                    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${product.progress}%` }} />
-                    </div>
+                {!data?.topDishes || data.topDishes.length === 0 ? (
+                  <div className="text-center py-10 text-xs text-muted-foreground">
+                    ບໍ່ມີຂໍ້ມູນເມນູອາຫານຂາຍດີ
                   </div>
-                ))}
+                ) : (
+                  data.topDishes.map((product, index) => (
+                    <div key={product.name}>
+                      <div className="flex items-center justify-between text-sm mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+                            {index + 1}
+                          </span>
+                          <span className="font-medium truncate max-w-[120px]" title={product.name}>
+                            {product.name}
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">{product.sold} ຈານ</span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${product.progress}%` }} />
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -202,36 +267,51 @@ export function DashboardOverview() {
           <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
             <div className="flex items-center justify-between p-5 border-b">
               <div>
-                <h3 className="font-semibold">ຄໍາສັ່ງຊື້ຫຼ້າສຸດ</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">5 ລາຍການລ່າສຸດ</p>
+                <h3 className="font-semibold text-slate-800">ລາຍການອໍເດີ້ຫຼ້າສຸດ</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">5 ລາຍການສັ່ງອາຫານຫຼ້າສຸດ</p>
               </div>
-              <a href="#" className="text-xs font-medium text-primary hover:underline">ເບິ່ງທັງໝົດ →</a>
+              <a href="/dashboard/orders" className="text-xs font-medium text-primary hover:underline">ເບິ່ງ ແລະ ຈັດການອໍເດີ້ທັງໝົດ →</a>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="px-5 py-3 text-left">ເລກທີ</th>
-                    <th className="px-5 py-3 text-left">ລູກຄ້າ</th>
-                    <th className="px-5 py-3 text-left">ສິນຄ້າ</th>
-                    <th className="px-5 py-3 text-right">ຈໍານວນ</th>
-                    <th className="px-5 py-3 text-center">ສະຖານະ</th>
+                    <th className="px-5 py-3 text-left">ເລກອໍເດີ້</th>
+                    <th className="px-5 py-3 text-left">ໂຕະ</th>
+                    <th className="px-5 py-3 text-left">ລາຍການອາຫານທີ່ສັ່ງ</th>
+                    <th className="px-5 py-3 text-right">ຍອດລວມ</th>
+                    <th className="px-5 py-3 text-center">ສະຖານະອໍເດີ້</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
-                  {recentOrders.map((order) => (
-                    <tr key={order.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-5 py-3 font-mono text-xs text-muted-foreground">{order.id}</td>
-                      <td className="px-5 py-3 font-medium">{order.customer}</td>
-                      <td className="px-5 py-3 text-muted-foreground">{order.product}</td>
-                      <td className="px-5 py-3 text-right font-semibold">{order.amount}</td>
-                      <td className="px-5 py-3 text-center">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${order.statusColor}`}>
-                          {order.status}
-                        </span>
+                <tbody className="divide-y text-slate-700">
+                  {!data?.recentOrders || data.recentOrders.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-8 text-center text-muted-foreground">
+                        ບໍ່ມີລາຍການອໍເດີ້ໃໝ່ໃນເວລານີ້
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    data.recentOrders.map((order) => {
+                      const color = ORDER_STATUS_COLORS[order.status as OrderStatus] || { bg: "bg-slate-100", text: "text-slate-700" };
+                      return (
+                        <tr key={order.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-5 py-3 font-mono text-xs text-muted-foreground">{order.id}</td>
+                          <td className="px-5 py-3 font-bold">{order.table}</td>
+                          <td className="px-5 py-3 text-slate-600 max-w-[300px] truncate" title={order.items}>
+                            {order.items}
+                          </td>
+                          <td className="px-5 py-3 text-right font-semibold text-slate-900">
+                            {formatLAK(order.amount)}
+                          </td>
+                          <td className="px-5 py-3 text-center">
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${color.bg} ${color.text}`}>
+                              {ORDER_STATUS_LAO[order.status as OrderStatus] || order.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
