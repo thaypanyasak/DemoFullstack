@@ -12,8 +12,12 @@ const notoSansLao = Noto_Sans_Lao({
 });
 
 export const metadata: Metadata = {
-  title: "ລະບົບຄຸ້ມຄອງສາງສິນຄ້າ",
-  description: "ແອັບ CRUD ຈັດການສິນຄ້າທີ່ທັນສະໄໝ",
+  title: "ເວັບສັ່ງອາຫານ | ຮ້ານອາຫານ ແສນສະບາຍ",
+  description: "ສະແກນ QR Code ເພື່ອສັ່ງອາຫານໄດ້ທັນທີ ໂດຍບໍ່ຕ້ອງລໍຖ້າພະນັກງານ",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({
