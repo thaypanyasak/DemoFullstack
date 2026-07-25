@@ -32,6 +32,7 @@ export interface OrderItem {
 export interface Order {
   id: number;
   tableNumber: string;
+  diningType: string;
   status: OrderStatus;
   totalAmount: number;
   createdAt: string;
@@ -41,6 +42,7 @@ export interface Order {
 
 export interface CreateOrderPayload {
   tableNumber: string;
+  diningType?: string;
   items: {
     productId: number;
     quantity: number;

@@ -69,6 +69,7 @@ export async function GET() {
             createdAt: earliestOrder.createdAt,
             itemsCount: itemsCount,
             subOrdersCount: matchingOrders.length,
+            orderIds: matchingOrders.map(o => o.id),
           },
         };
       }

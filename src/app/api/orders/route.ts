@@ -29,10 +29,13 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { tableNumber, items } = body as {
+    const { tableNumber, diningType, items } = body as {
       tableNumber: string;
+      diningType?: string;
       items: { productId: number; quantity: number }[];
     };
+
+    const finalDiningType = diningType || "DINE_IN";
 
     if (!tableNumber || !items || items.length === 0) {
       return NextResponse.json(
@@ -79,15 +82,19 @@ export async function POST(request: Request) {
     }
 
     // 3. Check for existing PENDING order to merge, otherwise create new
-    const existingPendingOrder = await db.order.findFirst({
-      where: {
-        tableNumber: tableNumber,
-        status: "PENDING",
-      },
-      include: {
-        items: true,
-      },
-    });
+    // We only merge DINE_IN orders. TAKEAWAY orders are always created as standalone new orders.
+    const existingPendingOrder = finalDiningType === "DINE_IN"
+      ? await db.order.findFirst({
+          where: {
+            tableNumber: tableNumber,
+            diningType: "DINE_IN",
+            status: "PENDING",
+          },
+          include: {
+            items: true,
+          },
+        })
+      : null;
 
     const order = await db.$transaction(async (tx) => {
       if (existingPendingOrder) {
@@ -139,6 +146,7 @@ export async function POST(request: Request) {
         return tx.order.create({
           data: {
             tableNumber,
+            diningType: finalDiningType,
             status: "PENDING",
             totalAmount,
             items: {

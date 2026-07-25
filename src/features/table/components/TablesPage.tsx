@@ -205,37 +205,96 @@ export function TablesPage() {
             </p>
           </div>
 
-          {/* Add Table form */}
-          <div className="bg-white border rounded-2xl p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-              <Plus className="h-4 w-4 text-primary" /> ເພີ່ມໂຕະໃໝ່
-            </h2>
-            <div className="flex flex-col sm:flex-row gap-3 items-start">
-              <div className="flex-1 space-y-1.5 w-full">
-                <input
-                  type="text"
-                  value={newTableName}
-                  onChange={(e) => {
-                    setNewTableName(e.target.value);
-                    setAddError("");
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddTable()}
-                  placeholder="ຊື່ໂຕະ (ຕົວຢ່າງ: 13, VIP-01, ກາເຟ...)"
-                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all ${
-                    addError ? "border-red-400 bg-red-50" : "border-slate-200"
-                  }`}
-                />
-                {addError && (
-                  <p className="text-xs text-red-600 font-medium">{addError}</p>
-                )}
+          {/* Top Panel Actions (Add Table & Takeaway QR Card) */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Add Table form (2/3 width on desktop) */}
+            <div className="lg:col-span-2 bg-white border rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                  <Plus className="h-4 w-4 text-primary" /> ເພີ່ມໂຕະໃໝ່
+                </h2>
+                <div className="flex flex-col sm:flex-row gap-3 items-start">
+                  <div className="flex-1 space-y-1.5 w-full">
+                    <input
+                      type="text"
+                      value={newTableName}
+                      onChange={(e) => {
+                        setNewTableName(e.target.value);
+                        setAddError("");
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddTable()}
+                      placeholder="ຊື່ໂຕະ (ຕົວຢ່າງ: 13, VIP-01, ກາເຟ...)"
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all ${
+                        addError ? "border-red-400 bg-red-50" : "border-slate-200"
+                      }`}
+                    />
+                    {addError && (
+                      <p className="text-xs text-red-600 font-medium">{addError}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleAddTable}
+                    className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/95 transition-all shadow-sm cursor-pointer shrink-0"
+                  >
+                    <Plus className="h-4 w-4" /> ເພີ່ມໂຕະ
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={handleAddTable}
-                className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/95 transition-all shadow-sm cursor-pointer shrink-0"
-              >
-                <Plus className="h-4 w-4" /> ເພີ່ມໂຕະ
-              </button>
             </div>
+
+            {/* Takeaway QR Card (1/3 width on desktop) */}
+            <div className="bg-sky-50/50 border border-sky-200 rounded-2xl p-5 shadow-sm flex items-center gap-5 relative overflow-hidden">
+              <div className="absolute top-2 right-2">
+                <span className="flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+                </span>
+              </div>
+              
+              {/* QR Image preview */}
+              <div className="bg-white p-2 rounded-xl border border-sky-100 shadow-inner shrink-0 h-24 w-24 flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(getQrUrl("TAKEAWAY"))}`}
+                  alt="Takeaway QR Code"
+                  className="h-full w-full object-contain"
+                />
+              </div>
+
+              <div className="flex-1 flex flex-col justify-between min-w-0 h-full">
+                <div className="min-w-0">
+                  <h3 className="font-extrabold text-sm text-sky-950 truncate flex items-center gap-1.5">
+                    🛍️ QR ຫໍ່ເມືອບ້ານ
+                  </h3>
+                  <p className="text-[10px] text-sky-600 font-semibold mt-0.5">
+                    SCAN FOR TAKEAWAY ONLY
+                  </p>
+                </div>
+                
+                <div className="flex gap-2 mt-3.5">
+                  <button
+                    onClick={() => {
+                      const takeawayTable = { id: -99, name: "TAKEAWAY", status: "VACANT" as const };
+                      handlePrintSingle(takeawayTable);
+                    }}
+                    className="flex-1 rounded-xl bg-sky-500 hover:bg-sky-600 text-white py-2 text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Printer className="h-3.5 w-3.5" /> ພິມ QR
+                  </button>
+                  <a
+                    href={getQrUrl("TAKEAWAY")}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-sky-200 bg-white text-sky-700 hover:bg-sky-50 p-2 transition-all flex items-center justify-center shrink-0"
+                    title="ເປີດລິ້ງສັ່ງອາຫານ"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
+              </div>
+            </div>
+
           </div>
 
           {/* Table stats & Legend */}
@@ -362,9 +421,9 @@ export function TablesPage() {
                         href={orderUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="w-full rounded-xl border py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                        className="w-full rounded-xl border border-slate-200 bg-white py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-primary transition-colors flex items-center justify-center gap-1 cursor-pointer"
                       >
-                        ທົດລອງ <ExternalLink className="h-3 w-3" />
+                        🛍️ ສັ່ງອາຫານໃຫ້ລູກຄ້າ <ExternalLink className="h-3 w-3" />
                       </a>
                     </div>
                   </div>
@@ -387,7 +446,9 @@ export function TablesPage() {
               <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                 <QrCode className="h-4 w-4 text-primary" />
                 {printingTables.length === 1
-                  ? `ພິມ QR ໂຕະ ${printingTables[0].name}`
+                  ? printingTables[0].name === "TAKEAWAY"
+                    ? "ພິມ QR ຫໍ່ເມືອບ້ານ (Takeaway)"
+                    : `ພິມ QR ໂຕະ ${printingTables[0].name}`
                   : `ພິມ QR ທັງໝົດ (${printingTables.length} ໂຕະ)`}
               </span>
               <button
@@ -408,39 +469,55 @@ export function TablesPage() {
                 className="flex flex-col gap-8 w-full max-w-[320px] bg-transparent"
               >
                 {printingTables.map((table) => {
+                  const isTakeawayTable = table.name === "TAKEAWAY";
                   const qrImg = getQrImageUrl(table.name, 260);
                   return (
                     <div
                       key={table.id}
-                      className="printable-qr-card bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-md flex flex-col items-center justify-center text-center gap-4 w-full mx-auto"
+                      className={`printable-qr-card bg-white border-2 rounded-3xl p-6 shadow-md flex flex-col items-center justify-center text-center gap-4 w-full mx-auto ${
+                        isTakeawayTable ? "border-sky-300" : "border-slate-200"
+                      }`}
                     >
                       {/* Restaurant name */}
                       <div className="space-y-1">
                         <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">
-                          ຮ້ານອາຫານ ແສນສະບາຍ
+                          ฮ້ານອາຫານ ແສນສະບາຍ
                         </h2>
-                        <div className="w-12 h-0.5 bg-gradient-to-r from-amber-500 to-orange-500 rounded-full mx-auto" />
+                        <div className={`w-12 h-0.5 rounded-full mx-auto ${
+                          isTakeawayTable ? "bg-sky-500" : "bg-gradient-to-r from-amber-500 to-orange-500"
+                        }`} />
                       </div>
 
                       {/* Instructions */}
                       <div>
-                        <p className="text-[10px] font-extrabold text-orange-600 tracking-wide uppercase">
-                          ສະແກນສັ່ງອາຫານຢູ່ໂຕະນີ້
+                        <p className={`text-[10px] font-extrabold tracking-wide uppercase ${
+                          isTakeawayTable ? "text-sky-600" : "text-orange-600"
+                        }`}>
+                          {isTakeawayTable ? "ສະແກນສັ່ງກັບບ້ານ / TAKEAWAY" : "ສະແກນສັ່ງອາຫານຢູ່ໂຕະນີ້"}
                         </p>
                         <p className="text-[9px] text-slate-400 font-semibold">SCAN TO ORDER</p>
                       </div>
 
                       {/* QR Code */}
-                      <div className="h-36 w-36 rounded-2xl border-2 border-slate-100 bg-white flex items-center justify-center p-2.5 shadow-inner">
+                      <div className={`h-36 w-36 rounded-2xl border-2 bg-white flex items-center justify-center p-2.5 shadow-inner ${
+                        isTakeawayTable ? "border-sky-100" : "border-slate-100"
+                      }`}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={qrImg} alt={`QR Table ${table.name}`} className="h-full w-full object-contain" />
                       </div>
 
                       {/* Table badge */}
-                      <div className="bg-slate-950 text-white rounded-2xl px-8 py-2 shadow-md">
-                        <span className="text-[8px] font-bold tracking-widest text-amber-400 block">TABLE</span>
-                        <span className="text-lg font-black tracking-widest">{table.name}</span>
-                      </div>
+                      {isTakeawayTable ? (
+                        <div className="bg-sky-500 text-white rounded-2xl px-6 py-2 shadow-md">
+                          <span className="text-[8px] font-bold tracking-widest text-sky-100 block">TAKEAWAY</span>
+                          <span className="text-sm font-black tracking-widest uppercase">ຫໍ່ເມືອບ້ານ</span>
+                        </div>
+                      ) : (
+                        <div className="bg-slate-950 text-white rounded-2xl px-8 py-2 shadow-md">
+                          <span className="text-[8px] font-bold tracking-widest text-amber-400 block">TABLE</span>
+                          <span className="text-lg font-black tracking-widest">{table.name}</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

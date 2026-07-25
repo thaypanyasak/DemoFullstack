@@ -56,9 +56,12 @@ export async function PUT(
         }
       }
 
-      if (status === "COMPLETED") {
+      if (status === "COMPLETED" && currentOrder.diningType !== "TAKEAWAY") {
         await tx.order.updateMany({
           where: {
+            diningType: {
+              not: "TAKEAWAY",
+            },
             tableNumber: currentOrder.tableNumber,
             status: {
               in: ["PENDING", "PREPARING", "SERVED"],

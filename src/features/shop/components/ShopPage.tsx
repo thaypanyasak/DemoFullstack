@@ -30,6 +30,8 @@ export function ShopPage() {
   
   // Table info
   const [tableNumber, setTableNumber] = useState<string | null>(null);
+  const [scannedTableNumber, setScannedTableNumber] = useState<string | null>(null);
+  const [diningType, setDiningType] = useState<"DINE_IN" | "TAKEAWAY">("DINE_IN");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
   
   // Shopping Cart state
@@ -40,7 +42,7 @@ export function ShopPage() {
 
   // Active orders tracking for this table
   const [activeTableOrders, setActiveTableOrders] = useState<Order[]>([]);
-  const [dbTables, setDbTables] = useState<{ id: number; name: string }[]>([]);
+  const [dbTables, setDbTables] = useState<any[]>([]);
 
   // View details modal
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -50,13 +52,21 @@ export function ShopPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // 1. Detect Table Number and Fetch Categories & Tables on mount
+  // 1. Detect Table Number / Takeaway mode and Fetch Categories & Tables on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const table = params.get("table");
-      if (table) {
+      const takeawayParam = params.get("takeaway");
+      
+      if (table === "TAKEAWAY" || takeawayParam === "true" || takeawayParam === "1") {
+        setTableNumber("TAKEAWAY");
+        setDiningType("TAKEAWAY");
+        setIsTableModalOpen(false);
+      } else if (table) {
         setTableNumber(table);
+        setScannedTableNumber(table);
+        setDiningType("DINE_IN");
       } else {
         setIsTableModalOpen(true);
       }
@@ -78,16 +88,26 @@ export function ShopPage() {
       .catch((err) => console.error("Error loading tables from database:", err));
   }, []);
 
-  // 2. Fetch active orders for this table to track status
+  // 2. Fetch active orders for this table to track status (dine-in table orders OR local takeaway orders)
   const fetchActiveOrders = async () => {
-    if (!tableNumber) return;
     try {
       const res = await fetch("/api/orders");
       if (res.ok) {
         const allOrders: Order[] = await res.json();
-        const filtered = allOrders.filter(
-          (o) => o.tableNumber === tableNumber && o.status !== "COMPLETED" && o.status !== "CANCELLED"
-        );
+        
+        let filtered: Order[] = [];
+        if (diningType === "TAKEAWAY") {
+          const stored = typeof window !== "undefined" ? localStorage.getItem("my_takeaway_orders") : null;
+          const myIds: number[] = stored ? JSON.parse(stored) : [];
+          filtered = allOrders.filter(
+            (o) => myIds.includes(o.id) && o.status !== "COMPLETED" && o.status !== "CANCELLED"
+          );
+        } else {
+          if (!tableNumber) return;
+          filtered = allOrders.filter(
+            (o) => o.tableNumber === tableNumber && o.status !== "COMPLETED" && o.status !== "CANCELLED"
+          );
+        }
         setActiveTableOrders(filtered);
       }
     } catch (err) {
@@ -96,27 +116,25 @@ export function ShopPage() {
   };
 
   useEffect(() => {
-    if (tableNumber) {
-      fetchActiveOrders();
+    fetchActiveOrders();
 
-      // Subscribe to postgres changes on the Order table in real-time
-      const channel = supabase
-        .channel("shop-realtime-orders")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "Order" },
-          () => {
-            // Re-fetch table orders when database updates occur (e.g. kitchen completes/updates status)
-            fetchActiveOrders();
-          }
-        )
-        .subscribe();
+    // Subscribe to postgres changes on the Order table in real-time
+    const channel = supabase
+      .channel("shop-realtime-orders")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "Order" },
+        () => {
+          // Re-fetch table orders when database updates occur (e.g. kitchen completes/updates status)
+          fetchActiveOrders();
+        }
+      )
+      .subscribe();
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }
-  }, [tableNumber]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tableNumber, diningType]);
 
   // 3. Fetch products list
   const fetchProducts = async () => {
@@ -192,13 +210,29 @@ export function ShopPage() {
     try {
       const payload = {
         tableNumber,
+        diningType,
         items: cart.map((c) => ({
           productId: c.product.id,
           quantity: c.quantity,
         })),
       };
 
-      await createOrder(payload);
+      const newOrder = await createOrder(payload);
+      if (newOrder && newOrder.id) {
+        // Save to my_order_ids (General order tracker)
+        const storedAll = localStorage.getItem("my_order_ids");
+        const listAll = storedAll ? JSON.parse(storedAll) : [];
+        listAll.push(newOrder.id);
+        localStorage.setItem("my_order_ids", JSON.stringify(listAll));
+
+        if (diningType === "TAKEAWAY") {
+          const stored = localStorage.getItem("my_takeaway_orders");
+          const list = stored ? JSON.parse(stored) : [];
+          list.push(newOrder.id);
+          localStorage.setItem("my_takeaway_orders", JSON.stringify(list));
+        }
+      }
+
       showToast("ສົ່ງອໍເດີ້ອາຫານສໍາເລັດ! ຫ້ອງຄົວກຳລັງກະກຽມໃຫ້ທ່ານ.");
       setCart([]);
       setIsCartOpen(false);
@@ -239,7 +273,7 @@ export function ShopPage() {
             </div>
             <div>
               <h1 className="text-base font-extrabold tracking-tight text-slate-900 leading-tight">
-                {tableNumber ? `ໂຕະ ${tableNumber}` : "ສັ່ງອາຫານປະຈຳໂຕະ"}
+              {diningType === "TAKEAWAY" ? "🛍️ ສັ່ງກັບບ້ານ (Takeaway)" : (tableNumber ? `ໂຕະ ${tableNumber}` : "ສັ່ງອາຫານປະຈຳໂຕະ")}
               </h1>
               <p className="text-[10px] text-muted-foreground font-semibold flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping"></span>
@@ -506,6 +540,42 @@ export function ShopPage() {
               </button>
             </div>
 
+            {/* Dining Type Selector */}
+            <div className="px-5 py-3 border-b bg-white flex gap-2 shrink-0">
+              <button
+                onClick={() => {
+                  setDiningType("DINE_IN");
+                  if (scannedTableNumber) {
+                    setTableNumber(scannedTableNumber);
+                  } else {
+                    setTableNumber(null);
+                    setIsCartOpen(false);
+                    setIsTableModalOpen(true);
+                  }
+                }}
+                className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  diningType === "DINE_IN"
+                    ? "bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-orange-500/20"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                🍽️ ກິນຢູ່ຮ້ານ (Dine-in)
+              </button>
+              <button
+                onClick={() => {
+                  setDiningType("TAKEAWAY");
+                  setTableNumber("TAKEAWAY");
+                }}
+                className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  diningType === "TAKEAWAY"
+                    ? "bg-sky-500 text-white shadow-md shadow-sky-500/20"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                🛍️ ຫໍ່ເມືອບ້ານ (Takeaway)
+              </button>
+            </div>
+
             {/* List */}
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
               {cart.map((item) => (
@@ -564,16 +634,25 @@ export function ShopPage() {
               <button
                 onClick={handlePlaceOrder}
                 disabled={cart.length === 0 || ordering || !tableNumber}
-                className="w-full rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 py-3.5 text-sm font-extrabold text-white hover:opacity-95 active:scale-[0.99] transition-all disabled:from-slate-200 disabled:to-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+                className={`w-full rounded-2xl py-3.5 text-sm font-extrabold text-white hover:opacity-95 active:scale-[0.99] transition-all disabled:from-slate-200 disabled:to-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 shadow-lg ${
+                  diningType === "TAKEAWAY"
+                    ? "bg-gradient-to-tr from-sky-500 to-sky-600 shadow-sky-500/10"
+                    : "bg-gradient-to-tr from-amber-500 to-orange-600 shadow-orange-500/10"
+                }`}
               >
                 {ordering ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
                     ກຳລັງສົ່ງອໍເດີ້...
                   </>
+                ) : diningType === "TAKEAWAY" ? (
+                  <>
+                    🛍️ ສັ່ງກັບບ້ານ / ຫໍ່ເມືອບ້ານ (Takeaway)
+                    <ArrowRight className="h-4 w-4" />
+                  </>
                 ) : (
                   <>
-                    ສັ່ງອາຫານໃສ່ ໂຕະ {tableNumber || ""}
+                    🍽️ ສັ່ງອາຫານໃສ່ ໂຕະ {tableNumber || ""}
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -608,31 +687,67 @@ export function ShopPage() {
                 ກະລຸນາເລືອກເລກໂຕະທີ່ທ່ານນັ່ງ ເພື່ອໃຫ້ຄົວເສີບອາຫານໄດ້ຢ່າງຖືກຕ້ອງ:
               </p>
 
+              {/* Takeaway option */}
+              <button
+                onClick={() => {
+                  setTableNumber("TAKEAWAY");
+                  setDiningType("TAKEAWAY");
+                  setIsTableModalOpen(false);
+                  showToast("ເລືອກສັ່ງກັບບ້ານ / ຫໍ່ເມືອບ້ານ!");
+                }}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-sm"
+              >
+                🛍️ ຫໍ່ເມືອບ້ານ / ສັ່ງກັບບ້ານ (Takeaway)
+              </button>
+
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-3 text-[10px] text-slate-400 font-bold uppercase">ຫຼື ນັ່ງກິນຢູ່ຮ້ານ</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
               {/* Grid of Tables */}
               <div className="grid grid-cols-4 gap-2.5">
-                {dbTables.map((t) => {
-                  const isActive = tableNumber === t.name;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => {
-                        setTableNumber(t.name);
-                        if (typeof window !== "undefined") {
-                          window.history.pushState({}, "", `?table=${encodeURIComponent(t.name)}`);
-                        }
-                        setIsTableModalOpen(false);
-                        showToast(`ເລືອກ ໂຕະ ${t.name} ສຳເລັດ!`);
-                      }}
-                      className={`py-3.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                        isActive
-                          ? "bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-orange-500/25 scale-105"
-                          : "bg-slate-100 hover:bg-slate-200 text-slate-700"
-                      }`}
-                    >
-                      {t.name}
-                    </button>
-                  );
-                })}
+                {(() => {
+                  const storedOrderIds = typeof window !== "undefined" ? localStorage.getItem("my_order_ids") : null;
+                  const myOrderIds: number[] = storedOrderIds ? JSON.parse(storedOrderIds) : [];
+
+                  return dbTables.map((t) => {
+                    const isActive = tableNumber === t.name;
+                    const isOccupied = t.status === "OCCUPIED";
+                    const isOccupiedByMe = isOccupied && t.activeOrder?.orderIds?.some((id: number) => myOrderIds.includes(id));
+                    const isDisabled = isOccupied && !isOccupiedByMe;
+
+                    return (
+                      <button
+                        key={t.id}
+                        disabled={isDisabled}
+                        onClick={() => {
+                          setTableNumber(t.name);
+                          setScannedTableNumber(t.name);
+                          if (typeof window !== "undefined") {
+                            window.history.pushState({}, "", `?table=${encodeURIComponent(t.name)}`);
+                          }
+                          setIsTableModalOpen(false);
+                          showToast(`ເລືອກ ໂຕະ ${t.name} ສຳເລັດ!`);
+                        }}
+                        className={`py-3.5 rounded-xl text-xs font-extrabold transition-all ${
+                          isDisabled
+                            ? "bg-red-50 text-red-300 border border-dashed border-red-200/60 cursor-not-allowed opacity-50"
+                            : isActive
+                              ? "bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-md shadow-orange-500/25 scale-105 cursor-pointer"
+                              : isOccupiedByMe
+                                ? "bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 cursor-pointer"
+                                : "bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                        }`}
+                        title={isDisabled ? "ໂຕະນີ້ມີແຂກນັ່ງແລ້ວ" : ""}
+                      >
+                        {t.name}
+                        {isOccupiedByMe && <span className="block text-[8px] font-black text-amber-600 mt-0.5">ໂຕະຂອງທ່ານ</span>}
+                      </button>
+                    );
+                  });
+                })()}
               </div>
 
               {/* Custom input if needed */}
@@ -651,7 +766,21 @@ export function ShopPage() {
                       if (e.key === "Enter") {
                         const val = (e.target as HTMLInputElement).value.trim();
                         if (val) {
+                          const matchingTable = dbTables.find(
+                            (t) => t.name.trim().toLowerCase() === val.toLowerCase()
+                          );
+                          const isOccupied = matchingTable?.status === "OCCUPIED";
+                          const storedOrderIds = typeof window !== "undefined" ? localStorage.getItem("my_order_ids") : null;
+                          const myOrderIds: number[] = storedOrderIds ? JSON.parse(storedOrderIds) : [];
+                          const isOccupiedByMe = isOccupied && matchingTable?.activeOrder?.orderIds?.some((id: number) => myOrderIds.includes(id));
+                          
+                          if (isOccupied && !isOccupiedByMe) {
+                            showToast("ໂຕະນີ້ມີແຂກທ່ານອື່ນນັ່ງຢູ່ແລ້ວ!", "error");
+                            return;
+                          }
+
                           setTableNumber(val);
+                          setScannedTableNumber(val);
                           if (typeof window !== "undefined") {
                             window.history.pushState({}, "", `?table=${val}`);
                           }
@@ -666,7 +795,21 @@ export function ShopPage() {
                       const input = document.getElementById("custom-table-input") as HTMLInputElement;
                       const val = input?.value.trim();
                       if (val) {
+                        const matchingTable = dbTables.find(
+                          (t) => t.name.trim().toLowerCase() === val.toLowerCase()
+                        );
+                        const isOccupied = matchingTable?.status === "OCCUPIED";
+                        const storedOrderIds = typeof window !== "undefined" ? localStorage.getItem("my_order_ids") : null;
+                        const myOrderIds: number[] = storedOrderIds ? JSON.parse(storedOrderIds) : [];
+                        const isOccupiedByMe = isOccupied && matchingTable?.activeOrder?.orderIds?.some((id: number) => myOrderIds.includes(id));
+                        
+                        if (isOccupied && !isOccupiedByMe) {
+                          showToast("ໂຕະນີ້ມີແຂກທ່ານອື່ນນັ່ງຢູ່ແລ້ວ!", "error");
+                          return;
+                        }
+
                         setTableNumber(val);
+                        setScannedTableNumber(val);
                         if (typeof window !== "undefined") {
                           window.history.pushState({}, "", `?table=${val}`);
                         }

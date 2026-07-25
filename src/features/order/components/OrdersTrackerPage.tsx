@@ -32,7 +32,7 @@ export function OrdersTrackerPage() {
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
   
   // Navigation tabs
-  const [viewTab, setViewTab] = useState<"kds" | "history">("kds");
+  const [viewTab, setViewTab] = useState<"kds" | "takeaway" | "history">("kds");
   // KDS Column tabs for mobile screens
   const [kdsMobileTab, setKdsMobileTab] = useState<"pending" | "preparing" | "served">("pending");
 
@@ -183,16 +183,24 @@ export function OrdersTrackerPage() {
     }
   };
 
-  // Group orders into columns
-  const pendingOrders = orders.filter((o) => o.status === "PENDING");
-  const preparingOrders = orders.filter((o) => o.status === "PREPARING");
+  // Group orders into columns - Sort PENDING & PREPARING by oldest first (ASC)
+  const pendingOrders = orders
+    .filter((o) => o.status === "PENDING")
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  const preparingOrders = orders
+    .filter((o) => o.status === "PREPARING")
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   const rawServedOrders = orders.filter((o) => o.status === "SERVED");
   const historyOrders = orders.filter((o) => o.status === "COMPLETED" || o.status === "CANCELLED");
 
   // Group served orders by table number to print and checkout as a single consolidated bill
+  // We do NOT consolidate takeaway orders; each takeaway order is treated as its own group.
   const servedOrdersGroupedByTable: Record<string, Order[]> = {};
   rawServedOrders.forEach((o) => {
-    const tableKey = o.tableNumber.trim().toLowerCase();
+    const tableKey = o.diningType === "TAKEAWAY"
+      ? `takeaway-${o.id}`
+      : o.tableNumber.trim().toLowerCase();
+
     if (!servedOrdersGroupedByTable[tableKey]) {
       servedOrdersGroupedByTable[tableKey] = [];
     }
@@ -218,7 +226,9 @@ export function OrdersTrackerPage() {
       });
     });
 
-    const mergedItems = Object.values(mergedItemsMap);
+    const mergedItems = Object.values(mergedItemsMap).sort(
+      (a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+    );
     const totalAmount = siblingOrders.reduce((sum, o) => sum + o.totalAmount, 0);
 
     return {
@@ -228,37 +238,75 @@ export function OrdersTrackerPage() {
       isConsolidated: siblingOrders.length > 1,
       consolidatedIds: siblingOrders.map(o => o.id),
     };
-  });
+  }).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   // Render KDS Card Template
   const renderOrderCard = (order: TrackerOrder) => {
     const color = ORDER_STATUS_COLORS[order.status];
+    const isTakeaway = order.diningType === "TAKEAWAY";
     return (
       <div
         key={order.id}
-        className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col justify-between overflow-hidden hover:shadow-md transition-shadow duration-200 shrink-0"
+        className={`bg-white border rounded-2xl shadow-sm flex flex-col justify-between overflow-hidden hover:shadow-md transition-all duration-200 shrink-0 ${
+          isTakeaway ? "border-sky-300 ring-1 ring-sky-300/35" : "border-slate-200"
+        }`}
       >
         {/* Card Header */}
-        <div className="p-4 border-b bg-slate-50/50 flex items-center justify-between">
+        <div className={`p-4 border-b flex items-center justify-between ${
+          isTakeaway ? "bg-sky-50/70" : "bg-slate-50/50"
+        }`}>
           <div>
-            <span className="text-[10px] font-mono text-slate-400 block">
+            <span className={`block text-sm font-black mb-1.5 ${
+              isTakeaway ? "text-sky-500" : "text-amber-500"
+            }`}>
               {order.consolidatedIds && order.consolidatedIds.length > 1
-                ? `IDs: ${order.consolidatedIds.map((id) => `#${id}`).join(" + ")}`
-                : `ID: #${order.id}`}
+                ? `ຄິວທີ: ${order.consolidatedIds.map((id) => `#${id}`).join(" + ")}`
+                : `ຄິວທີ: #${order.id}`}
             </span>
-            <h3 className="text-sm font-extrabold text-slate-800 leading-tight">
-              |ໂຕະ {order.tableNumber}
+            <h3 className={`text-sm font-extrabold leading-tight flex items-center gap-1.5 ${
+              isTakeaway ? "text-sky-800" : "text-slate-800"
+            }`}>
+              {isTakeaway ? (
+                <>
+                  <span className="animate-pulse">🛍️</span> ຫໍ່ເມືອບ້ານ (#{order.id})
+                </>
+              ) : (
+                `ໂຕະ ${order.tableNumber}`
+              )}
             </h3>
           </div>
-          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wide ${color.bg} ${color.text}`}>
-            {ORDER_STATUS_LAO[order.status]}
-          </span>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-1.5">
+              {isTakeaway && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPrintingOrder(order);
+                  }}
+                  className="p-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 cursor-pointer shadow-sm flex items-center justify-center"
+                  title="ພິມໃບບິນຄິວ"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wide ${color.bg} ${color.text}`}>
+                {ORDER_STATUS_LAO[order.status]}
+              </span>
+            </div>
+            {isTakeaway && (
+              <span className="bg-sky-500 text-white text-[8px] font-black uppercase px-2 py-0.5 rounded-full animate-pulse self-end">
+                TAKEOUT
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Items List */}
         <div className="p-4 flex-1 space-y-3">
           <div className="divide-y">
-            {order.items.map((item: any) => {
+            {[...order.items]
+              .sort((a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+              .map((item: any) => {
               // Item is new to the order (created at least 10s after order creation)
               const isNewItem =
                 order.status === "PENDING" &&
@@ -443,7 +491,7 @@ export function OrdersTrackerPage() {
             </div>
             
             {/* View Switching Tabs */}
-            <div className="flex bg-slate-100 p-1 rounded-xl w-fit self-start sm:self-auto">
+            <div className="flex bg-slate-100 p-1 rounded-xl w-fit self-start sm:self-auto gap-1">
               <button
                 onClick={() => setViewTab("kds")}
                 className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
@@ -452,7 +500,17 @@ export function OrdersTrackerPage() {
                     : "text-slate-500 hover:text-slate-700"
                 }`}
               >
-                ແຜງຄຸ້ມຄອງ KDS
+                🍽️ ຈັດການໂຕະ KDS
+              </button>
+              <button
+                onClick={() => setViewTab("takeaway")}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  viewTab === "takeaway"
+                    ? "bg-sky-500 text-white shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                🛍️ ຫໍ່ເມືອບ້ານ / Takeaway
               </button>
               <button
                 onClick={() => setViewTab("history")}
@@ -462,7 +520,7 @@ export function OrdersTrackerPage() {
                     : "text-slate-500 hover:text-slate-700"
                 }`}
               >
-                ประຫວັດອໍເດີ້
+                📜 ປະຫວັດອໍເດີ້
               </button>
             </div>
           </div>
@@ -593,6 +651,36 @@ export function OrdersTrackerPage() {
 
               </div>
             </div>
+          ) : viewTab === "takeaway" ? (
+            // ── TAKEAWAY ORDERS VIEW ──
+            <div className="flex flex-col gap-4 flex-1">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                <div className="flex items-center justify-between border-b pb-4 mb-5">
+                  <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                    🛍️ ລາຍການອໍເດີ້ຫໍ່ເມືອບ້ານ (Active Takeaway Orders)
+                  </h2>
+                  <span className="bg-sky-100 text-sky-800 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
+                    ທັງໝົດ: {orders.filter(o => o.diningType === "TAKEAWAY" && o.status !== "COMPLETED" && o.status !== "CANCELLED").length} ອໍເດີ້
+                  </span>
+                </div>
+
+                {orders.filter(o => o.diningType === "TAKEAWAY" && o.status !== "COMPLETED" && o.status !== "CANCELLED").length === 0 ? (
+                  <div className="text-center py-24 text-slate-400">
+                    <ClipboardList className="h-12 w-12 mx-auto opacity-20 mb-3 text-sky-500 animate-pulse" />
+                    <p className="text-xs font-black text-slate-500">ບໍ່ມີລາຍການອໍເດີ້ຫໍ່ເມືອບ້ານໃນເວລານີ້</p>
+                    <p className="text-[10px] text-slate-400 mt-1">ເມື່ອມີລູກຄ້າສັ່ງແບບ Takeaway ລະບົບຈະແຈ້ງເຕືອນ ແລະ ປະກົດຢູ່ບ່ອນນີ້</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {orders
+                      .filter(o => o.diningType === "TAKEAWAY" && o.status !== "COMPLETED" && o.status !== "CANCELLED")
+                      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+                      .map(renderOrderCard)
+                    }
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             // ── HISTORY COMPLETED/CANCELLED VIEW ──
             <div className="rounded-xl border bg-card overflow-hidden">
@@ -667,14 +755,19 @@ export function OrdersTrackerPage() {
         if (!printingOrder) return null;
 
         // Find all sibling orders of the same table session to show on receipt slip
-        const printSessionOrders = printingOrder.status === "COMPLETED" || printingOrder.status === "CANCELLED"
-          ? [printingOrder]
-          : orders.filter(
-              (o) =>
-                o.tableNumber.trim().toLowerCase() === printingOrder.tableNumber.trim().toLowerCase() &&
-                o.status !== "COMPLETED" &&
-                o.status !== "CANCELLED"
-            );
+        // For takeaway orders, we never consolidate. We only print the single selected order.
+        const printSessionOrders =
+          printingOrder.status === "COMPLETED" ||
+          printingOrder.status === "CANCELLED" ||
+          printingOrder.diningType === "TAKEAWAY"
+            ? [printingOrder]
+            : orders.filter(
+                (o) =>
+                  o.diningType !== "TAKEAWAY" &&
+                  o.tableNumber.trim().toLowerCase() === printingOrder.tableNumber.trim().toLowerCase() &&
+                  o.status !== "COMPLETED" &&
+                  o.status !== "CANCELLED"
+              );
 
         // Group same products and sum their quantities
         const printItemsMap: Record<number, { name: string; quantity: number; price: number }> = {};
@@ -732,10 +825,17 @@ export function OrdersTrackerPage() {
 
                   {/* Metadata */}
                   <div className="space-y-1 text-[9px] mb-2">
-                    <div className="flex justify-between">
-                      <span>ເລກໂຕະ / Table:</span>
-                      <span className="font-bold">ໂຕະ {printingOrder.tableNumber}</span>
-                    </div>
+                    {printingOrder.diningType === "TAKEAWAY" ? (
+                      <div className="bg-sky-50 border border-sky-100 p-2.5 rounded-lg text-center space-y-1 mb-2">
+                        <span className="text-[10px] font-black text-sky-800 uppercase block tracking-wider">ຫໍ່ເມືອບ້ານ / TAKEAWAY</span>
+                        <h2 className="text-xl font-black text-sky-950 font-mono tracking-wide">ຄິວທີ: {printingOrder.id}</h2>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between">
+                        <span>ເລກໂຕະ / Table:</span>
+                        <span className="font-bold">ໂຕະ {printingOrder.tableNumber}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span>ເລກອໍເດີ້ / Bill No:</span>
                       <span>
