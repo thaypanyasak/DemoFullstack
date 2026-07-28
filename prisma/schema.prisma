@@ -31,14 +31,16 @@ model Product {
 }
 
 model Order {
-  id          Int         @id @default(autoincrement())
-  tableNumber String      // ເລກໂຕະ (ເຊັ່ນ: "05", "12")
-  diningType  String      @default("DINE_IN") // "DINE_IN" or "TAKEAWAY"
-  status      String      // "PENDING", "PREPARING", "SERVED", "COMPLETED", "CANCELLED"
-  totalAmount Float
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  items       OrderItem[]
+  id            Int         @id @default(autoincrement())
+  tableNumber   String      // ເລກໂຕະ (ເຊັ່ນ: "05", "12")
+  diningType    String      @default("DINE_IN") // "DINE_IN" or "TAKEAWAY"
+  status        String      // "PENDING", "PREPARING", "SERVED", "COMPLETED", "CANCELLED"
+  totalAmount   Float
+  transactionId String?     // ID Giao dịch từ Phajay
+  paymentMethod String?     // Ví dụ: "BCEL"
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  items         OrderItem[]
 }
 
 model OrderItem {

@@ -660,11 +660,11 @@ export function OrdersTrackerPage() {
                     🛍️ ລາຍການອໍເດີ້ຫໍ່ເມືອບ້ານ (Active Takeaway Orders)
                   </h2>
                   <span className="bg-sky-100 text-sky-800 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
-                    ທັງໝົດ: {orders.filter(o => o.diningType === "TAKEAWAY" && o.status !== "COMPLETED" && o.status !== "CANCELLED").length} ອໍເດີ້
+                    ທັງໝົດ: {orders.filter(o => o.diningType === "TAKEAWAY" && o.status !== "UNPAID" && o.status !== "COMPLETED" && o.status !== "CANCELLED").length} ອໍເດີ້
                   </span>
                 </div>
 
-                {orders.filter(o => o.diningType === "TAKEAWAY" && o.status !== "COMPLETED" && o.status !== "CANCELLED").length === 0 ? (
+                {orders.filter(o => o.diningType === "TAKEAWAY" && o.status !== "UNPAID" && o.status !== "COMPLETED" && o.status !== "CANCELLED").length === 0 ? (
                   <div className="text-center py-24 text-slate-400">
                     <ClipboardList className="h-12 w-12 mx-auto opacity-20 mb-3 text-sky-500 animate-pulse" />
                     <p className="text-xs font-black text-slate-500">ບໍ່ມີລາຍການອໍເດີ້ຫໍ່ເມືອບ້ານໃນເວລານີ້</p>
@@ -673,7 +673,7 @@ export function OrdersTrackerPage() {
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {orders
-                      .filter(o => o.diningType === "TAKEAWAY" && o.status !== "COMPLETED" && o.status !== "CANCELLED")
+                      .filter(o => o.diningType === "TAKEAWAY" && o.status !== "UNPAID" && o.status !== "COMPLETED" && o.status !== "CANCELLED")
                       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
                       .map(renderOrderCard)
                     }

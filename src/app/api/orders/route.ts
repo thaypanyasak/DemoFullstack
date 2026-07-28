@@ -81,27 +81,15 @@ export async function POST(request: Request) {
       });
     }
 
-    // 3. Check for existing PENDING order to merge, otherwise create new
-    // We only merge DINE_IN orders. TAKEAWAY orders are always created as standalone new orders.
-    const existingPendingOrder = finalDiningType === "DINE_IN"
-      ? await db.order.findFirst({
-          where: {
-            tableNumber: tableNumber,
-            diningType: "DINE_IN",
-            status: "PENDING",
-          },
-          include: {
-            items: true,
-          },
-        })
-      : null;
+    // 3. Disable order merging to enforce individual QR payment per checkout session
+    const existingPendingOrder = null;
 
     const order = await db.$transaction(async (tx) => {
       if (existingPendingOrder) {
-        // Merge items
+        // Merge items (unreachable, kept for logic compilation safety if reverted)
         for (const item of itemsData) {
-          const existingItem = existingPendingOrder.items.find(
-            (i) => i.productId === item.productId
+          const existingItem = (existingPendingOrder as any).items.find(
+            (i: any) => i.productId === item.productId
           );
 
           if (existingItem) {
@@ -116,7 +104,7 @@ export async function POST(request: Request) {
           } else {
             await tx.orderItem.create({
               data: {
-                orderId: existingPendingOrder.id,
+                orderId: (existingPendingOrder as any).id,
                 productId: item.productId,
                 quantity: item.quantity,
                 price: item.price,
@@ -127,7 +115,7 @@ export async function POST(request: Request) {
 
         // Update totalAmount
         return tx.order.update({
-          where: { id: existingPendingOrder.id },
+          where: { id: (existingPendingOrder as any).id },
           data: {
             totalAmount: {
               increment: totalAmount,
@@ -147,7 +135,7 @@ export async function POST(request: Request) {
           data: {
             tableNumber,
             diningType: finalDiningType,
-            status: "PENDING",
+            status: "UNPAID",
             totalAmount,
             items: {
               create: itemsData,
@@ -164,7 +152,72 @@ export async function POST(request: Request) {
       }
     });
 
-    return NextResponse.json(order, { status: 201 });
+    let paymentDetails = null;
+    const phajaySecretKey = process.env.PHAJAY_SECRET_KEY;
+
+    if (phajaySecretKey) {
+      try {
+        const response = await fetch("https://payment-gateway.phajay.co/v1/api/payment/generate-bcel-qr", {
+          method: "POST",
+          headers: {
+            "secretKey": phajaySecretKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            amount: order.totalAmount,
+            description: `ORDER #${order.id}`,
+            tag1: order.id.toString(),
+            tag2: order.diningType
+          })
+        });
+
+        if (response.ok) {
+          const resData = await response.json();
+          if (resData.transactionId) {
+            await db.order.update({
+              where: { id: order.id },
+              data: {
+                transactionId: resData.transactionId,
+                paymentMethod: "BCEL"
+              }
+            });
+          }
+
+          paymentDetails = {
+            transactionId: resData.transactionId || `MOCK_TXN_${order.id}`,
+            qrCode: resData.qrCode || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(resData.link || "onepay://qr/" + order.id)}`,
+            link: resData.link || `onepay://qr/${order.id}`
+          };
+        }
+      } catch (apiError) {
+        console.error("Phajay API error, using mock fallback:", apiError);
+      }
+    }
+
+    if (!paymentDetails) {
+      const mockTxnId = `MOCK_TXN_${order.id}_${Date.now()}`;
+      await db.order.update({
+        where: { id: order.id },
+        data: {
+          transactionId: mockTxnId,
+          paymentMethod: "BCEL_MOCK"
+        }
+      });
+
+      const mockData = `onepay://qr/mock_${order.id}_amount_${order.totalAmount}`;
+      paymentDetails = {
+        transactionId: mockTxnId,
+        qrCode: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(mockData)}`,
+        link: mockData
+      };
+    }
+
+    const responseData = {
+      ...order,
+      paymentDetails
+    };
+
+    return NextResponse.json(responseData, { status: 201 });
   } catch (error) {
     console.error("POST Order Error:", error);
     return NextResponse.json(

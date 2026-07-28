@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ShoppingBag, Search, Package, ArrowRight, Eye, ShoppingCart, Clock, Utensils, CheckCircle2, ChevronRight, Plus, Minus, X, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
+import { ShoppingBag, Search, Package, ArrowRight, Eye, ShoppingCart, Clock, Utensils, CheckCircle2, ChevronRight, Plus, Minus, X, Trash2, XCircle, Smartphone, Zap } from "lucide-react";
 import { formatLAK } from "@/lib/format";
 import type { Product } from "@/types/product";
 import type { Category } from "@/types/category";
@@ -46,6 +47,18 @@ export function ShopPage() {
 
   // View details modal
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  // Payment gateway modal states
+  const [paymentOrder, setPaymentOrder] = useState<any | null>(null);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
+  const [paymentTimeLeft, setPaymentTimeLeft] = useState(300);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -100,12 +113,12 @@ export function ShopPage() {
           const stored = typeof window !== "undefined" ? localStorage.getItem("my_takeaway_orders") : null;
           const myIds: number[] = stored ? JSON.parse(stored) : [];
           filtered = allOrders.filter(
-            (o) => myIds.includes(o.id) && o.status !== "COMPLETED" && o.status !== "CANCELLED"
+            (o) => myIds.includes(o.id) && o.status !== "UNPAID" && o.status !== "COMPLETED" && o.status !== "CANCELLED"
           );
         } else {
           if (!tableNumber) return;
           filtered = allOrders.filter(
-            (o) => o.tableNumber === tableNumber && o.status !== "COMPLETED" && o.status !== "CANCELLED"
+            (o) => o.tableNumber === tableNumber && o.status !== "UNPAID" && o.status !== "COMPLETED" && o.status !== "CANCELLED"
           );
         }
         setActiveTableOrders(filtered);
@@ -114,6 +127,60 @@ export function ShopPage() {
       console.error("Error fetching table orders:", err);
     }
   };
+
+  // Countdown timer for payment modal
+  useEffect(() => {
+    if (!isPaymentModalOpen || !paymentOrder) return;
+    
+    setPaymentTimeLeft(300); // 5 minutes
+
+    const timer = setInterval(() => {
+      setPaymentTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          showToast("QR Code ໝົດອາຍຸແລ້ວ! ກະລຸນາສັ່ງໃໝ່.", "error");
+          setIsPaymentModalOpen(false);
+          setPaymentOrder(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isPaymentModalOpen, paymentOrder]);
+
+  // Polling for payment status of the active order
+  useEffect(() => {
+    if (!paymentOrder || !isPaymentModalOpen) return;
+
+    let isSubscribed = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/orders/${paymentOrder.id}`);
+        if (res.ok && isSubscribed) {
+          const data = await res.json();
+          if (data && data.status !== "UNPAID") {
+            clearInterval(interval);
+            setIsPaymentModalOpen(false);
+            setPaymentOrder(null);
+            setCart([]); // Clear cart on successful payment
+            setIsCartOpen(false);
+            setIsSuccessModalOpen(true); // Show order placed successfully modal
+            showToast("ຊຳລະເງິນສຳເລັດແລ້ວ! ອາຫານກຳລັງຖືກກະກຽມ.");
+            fetchActiveOrders();
+          }
+        }
+      } catch (err) {
+        console.error("Error checking payment status:", err);
+      }
+    }, 3000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, [paymentOrder, isPaymentModalOpen]);
 
   useEffect(() => {
     fetchActiveOrders();
@@ -231,12 +298,11 @@ export function ShopPage() {
           list.push(newOrder.id);
           localStorage.setItem("my_takeaway_orders", JSON.stringify(list));
         }
-      }
 
-      showToast("ສົ່ງອໍເດີ້ອາຫານສໍາເລັດ! ຫ້ອງຄົວກຳລັງກະກຽມໃຫ້ທ່ານ.");
-      setCart([]);
-      setIsCartOpen(false);
-      fetchActiveOrders();
+        // Trigger payment flow for both DINE_IN and TAKEAWAY
+        setPaymentOrder(newOrder);
+        setIsPaymentModalOpen(true);
+      }
     } catch (err: any) {
       showToast(err.message || "ເກີດຂໍ້ຜິດພາດໃນການສັ່ງອາຫານ", "error");
     } finally {
@@ -930,6 +996,176 @@ export function ShopPage() {
           </div>
         </div>
       )}
+
+      {/* ── Phajay Payment Gateway QR Modal ── */}
+      {isPaymentModalOpen && paymentOrder && paymentOrder.paymentDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 text-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-slate-800/80 flex flex-col scale-in animate-in fade-in zoom-in duration-200">
+            {/* Top Navigation / Brand Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-ping"></div>
+                <span className="text-[11px] font-black tracking-widest text-indigo-400 uppercase">PhaJay Connect</span>
+              </div>
+              <button
+                onClick={() => {
+                  setIsPaymentModalOpen(false);
+                  setPaymentOrder(null);
+                }}
+                className="rounded-full p-1.5 bg-slate-800/50 hover:bg-slate-800 transition-colors text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-5 flex-grow flex flex-col items-center">
+              {/* Payment Details Header */}
+              <div className="text-center space-y-1">
+                <span className="text-xs text-slate-400 block font-medium">ເລກອໍເດີ້ / Order #{paymentOrder.id}</span>
+                <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2.5 py-0.5 rounded-full border border-indigo-500/20 inline-block font-bold">
+                  LAO QR PAYMENT
+                </span>
+              </div>
+
+              {/* Total Amount Box */}
+              <div className="w-full py-4 px-5 bg-gradient-to-br from-slate-950 to-slate-900 rounded-2xl border border-slate-800 text-center">
+                <span className="text-[10px] text-slate-500 uppercase tracking-widest block font-bold">ຍອດລວມທັງໝົດ / Total Amount</span>
+                <span className="text-3xl font-black tracking-tight text-white font-mono block mt-1">
+                  {formatLAK(paymentOrder.totalAmount)}
+                </span>
+              </div>
+
+              {/* QR Code Wrapper with Premium Styled Border */}
+              <div className="relative p-5 bg-white rounded-2xl shadow-lg shadow-black/40 flex items-center justify-center overflow-hidden">
+                <PhajayQRCanvas qrString={paymentOrder.paymentDetails.qrCode} />
+                
+                {/* Expired Overlay */}
+                {paymentTimeLeft === 0 && (
+                  <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center p-4 text-slate-950 space-y-2">
+                    <XCircle className="h-10 w-10 text-red-500 animate-bounce" />
+                    <span className="font-black text-sm">QR Code ໝົດອາຍຸ</span>
+                    <span className="text-[10px] text-slate-500">ກະລຸນາປິດໜ້າຈໍແລ້ວສັ່ງໃໝ່</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Timer Progress Indicator */}
+              <div className="w-full space-y-2">
+                <div className="flex justify-between items-center text-[11px] font-bold">
+                  <span className="text-slate-400">QR ຈະໝົດອາຍຸພາຍໃນ / QR Expires In</span>
+                  <span className={`font-mono text-xs ${paymentTimeLeft < 60 ? "text-rose-500 animate-pulse font-black" : "text-amber-500"}`}>
+                    {formatTime(paymentTimeLeft)}
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-1000 ${paymentTimeLeft < 60 ? "bg-rose-500" : "bg-gradient-to-r from-amber-500 to-indigo-500"}`}
+                    style={{ width: `${(paymentTimeLeft / 300) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+
+              {/* Connection Status / Live Polling Loader */}
+              <div className="w-full py-2.5 px-4 bg-slate-950/50 rounded-xl border border-slate-800/80 flex items-center justify-center gap-2.5">
+                <div className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-ping"></div>
+                <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">
+                  ກຳລັງກວດສອບການໂອນເງິນ / Waiting for pay...
+                </span>
+              </div>
+
+              {/* Banking Deep Link Open App */}
+              {paymentOrder.paymentDetails.link && (
+                <a
+                  href={paymentOrder.paymentDetails.link}
+                  className="w-full flex items-center justify-center gap-2.5 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-indigo-500/10 active:scale-98 cursor-pointer uppercase tracking-wider text-center"
+                >
+                  <Smartphone className="w-4 h-4" /> ໂອນຜ່ານແອັບ BCEL ONE
+                </a>
+              )}
+
+              
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-950/60 border-t border-slate-850 flex flex-col gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`/api/orders/${paymentOrder.id}`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ status: "PENDING" }),
+                    });
+                    if (res.ok) {
+                      showToast("ຈຳລອງການຊຳລະເງິນສຳເລັດ! / Mock Payment Successful!");
+                    } else {
+                      showToast("ຈຳລອງການຊຳລະເງິນລົ້ມເຫຼວ / Mock Payment Failed", "error");
+                    }
+                  } catch (err) {
+                    console.error("Simulation error:", err);
+                    showToast("ເກີดຂໍ້ຜິດພາດໃນການຈຳລອງ / Error during simulation", "error");
+                  }
+                }}
+                className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-emerald-400 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Zap className="w-4 h-4" /> ຈຳລອງການຈ່າຍເງິນ (MOCK PAY)
+              </button>
+              <button
+                onClick={() => {
+                  setIsPaymentModalOpen(false);
+                  setPaymentOrder(null);
+                }}
+                className="w-full py-2.5 rounded-xl border border-slate-800 bg-transparent text-slate-400 hover:text-white hover:bg-slate-800/30 text-xs font-bold transition-colors cursor-pointer"
+              >
+                ຍົກເລີກ / Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Order Success Modal ── */}
+      {isSuccessModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-slate-100 p-6 flex flex-col items-center text-center space-y-5 scale-in animate-in fade-in zoom-in duration-200">
+            {/* Celebration Graphic */}
+            <div className="h-20 w-20 bg-green-50 rounded-full flex items-center justify-center border border-green-100 shadow-inner">
+              <CheckCircle2 className="h-10 w-10 text-green-500 animate-bounce" />
+            </div>
+
+            {/* Content */}
+            <div className="space-y-2">
+              <h3 className="text-lg font-black text-slate-800">ສັ່ງອາຫານສຳເລັດແລ້ວ!</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                ອໍເດີ້ຂອງທ່ານໄດ້ຮັບການຊຳລະເງິນ ແລະ ຖືກສົ່ງໄປທີ່ຫ້ອງຄົວແລ້ວ. ອາຫານຈະມາເສີບໃນອີກບໍ່ດົນ!
+              </p>
+            </div>
+
+            {/* Checkbox Detail */}
+            <div className="w-full bg-slate-50 border rounded-2xl p-4 text-left text-xs space-y-1.5 font-bold text-slate-700">
+              <div className="flex justify-between">
+                <span className="text-slate-400">ປະເພດອໍເດີ້ / Type:</span>
+                <span className="text-slate-900 uppercase">{diningType === "TAKEAWAY" ? "ຫໍ່ກັບບ້ານ / Takeaway" : "ນັ່ງກິນຢູ່ຮ້ານ / Dine-in"}</span>
+              </div>
+              {diningType !== "TAKEAWAY" && tableNumber && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">ເບີໂຕະ / Table:</span>
+                  <span className="text-amber-600 font-black text-sm">ໂຕະ {tableNumber}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Confirm Button */}
+            <button
+              onClick={() => setIsSuccessModalOpen(false)}
+              className="w-full py-3.5 bg-gradient-to-tr from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
+            >
+              ຕົກລົງ / Confirm
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -942,4 +1178,27 @@ function Loader2({ className }: { className?: string }) {
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
     </svg>
   );
+}
+
+// Renders raw EMV QR string from Phajay into a scannable canvas QR image
+// (BCEL One, JDB, IB and other Lao banking apps can scan this)
+function PhajayQRCanvas({ qrString }: { qrString: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !qrString) return;
+    QRCode.toCanvas(canvasRef.current, qrString, {
+      width: 224,
+      margin: 2,
+      color: {
+        dark: "#1e293b",
+        light: "#ffffff",
+      },
+      errorCorrectionLevel: "M",
+    }).catch((err: any) => {
+      console.error("QR render error:", err);
+    });
+  }, [qrString]);
+
+  return <canvas ref={canvasRef} className="rounded-lg shadow-sm" />;
 }

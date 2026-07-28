@@ -1,8 +1,9 @@
 import type { Product } from "./product";
 
-export type OrderStatus = "PENDING" | "PREPARING" | "SERVED" | "COMPLETED" | "CANCELLED";
+export type OrderStatus = "UNPAID" | "PENDING" | "PREPARING" | "SERVED" | "COMPLETED" | "CANCELLED";
 
 export const ORDER_STATUS_LAO: Record<OrderStatus, string> = {
+  UNPAID: "ຍັງບໍ່ທັນຈ່າຍ",
   PENDING: "ກຳລັງລໍຖ້າ",
   PREPARING: "ກຳລັງເຮັດ",
   SERVED: "ເສີບແລ້ວ",
@@ -11,6 +12,7 @@ export const ORDER_STATUS_LAO: Record<OrderStatus, string> = {
 };
 
 export const ORDER_STATUS_COLORS: Record<OrderStatus, { bg: string; text: string }> = {
+  UNPAID: { bg: "bg-gray-100", text: "text-gray-700" },
   PENDING: { bg: "bg-amber-100", text: "text-amber-700" },
   PREPARING: { bg: "bg-blue-100", text: "text-blue-700" },
   SERVED: { bg: "bg-purple-100", text: "text-purple-700" },

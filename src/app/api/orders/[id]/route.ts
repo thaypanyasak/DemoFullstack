@@ -98,3 +98,46 @@ export async function PUT(
     );
   }
 }
+
+// ດຶງຂໍ້ມູນອໍເດີ້ດ່ຽວ (ສຳລັບ Client-side polling ຕິດຕາມການຊຳລະເງິນ)
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const orderId = parseInt(id);
+    if (isNaN(orderId)) {
+      return NextResponse.json(
+        { error: "ID ອໍເດີ້ບໍ່ຖືກຕ້ອງ" },
+        { status: 400 }
+      );
+    }
+
+    const order = await db.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            product: true,
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      return NextResponse.json(
+        { error: "ບໍ່ພົບຂໍ້ມູນອໍເດີ້" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(order);
+  } catch (error) {
+    console.error("GET Single Order Error:", error);
+    return NextResponse.json(
+      { error: "ເກີດຂໍ້ຜິດພາດໃນການດຶງຂໍ້ມູນອໍເດີ້" },
+      { status: 500 }
+    );
+  }
+}
